@@ -6,6 +6,11 @@ import { v4 as uuidv4 } from 'uuid';
 import { networkInterfaces } from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import Redis from 'ioredis';
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,7 +19,26 @@ const app = express();
 const server = createServer(app);
 const wss = new WebSocketServer({ server, path: '/signaling' });
 
-const PORT = 8080;
+const PORT = process.env.PORT || 8080;
+
+// Initialize Valkey (Redis) client
+const valkey = new Redis({
+  host: process.env.VALKEY_HOST || 'localhost',
+  port: process.env.VALKEY_PORT || 6379,
+  password: process.env.VALKEY_PASSWORD || undefined,
+  retryStrategy: (times) => {
+    const delay = Math.min(times * 50, 2000);
+    return delay;
+  }
+});
+
+valkey.on('connect', () => {
+  console.log('✅ Connected to Valkey');
+});
+
+valkey.on('error', (err) => {
+  console.error('❌ Valkey connection error:', err);
+});
 
 // Get local network IP
 function getLocalIP() {
@@ -32,19 +56,36 @@ function getLocalIP() {
 
 const SERVER_IP = getLocalIP();
 
-// Session state
-const sessionState = {
-  filmGuid: uuidv4(),
-  productionCompanyGuid: uuidv4(),
-  cameras: {
-    1: { connected: false, wsClient: null, metadata: {} },
-    2: { connected: false, wsClient: null, metadata: {} },
-    3: { connected: false, wsClient: null, metadata: {} }
+// Initialize session in Valkey if not exists
+async function initializeSession() {
+  const sessionExists = await valkey.exists('session:filmGuid');
+  if (!sessionExists) {
+    await valkey.set('session:filmGuid', uuidv4());
+    await valkey.set('session:productionCompanyGuid', uuidv4());
+    console.log('🎬 Initialized new session in Valkey');
   }
-};
+}
 
-// Track all connected web clients
+// Camera state management in Valkey
+async function getCameraState(cameraId) {
+  const state = await valkey.hgetall(`camera:${cameraId}`);
+  return {
+    connected: state.connected === 'true',
+    metadata: state.metadata ? JSON.parse(state.metadata) : {}
+  };
+}
+
+async function setCameraState(cameraId, connected, metadata = {}) {
+  await valkey.hmset(`camera:${cameraId}`, {
+    connected: connected.toString(),
+    metadata: JSON.stringify(metadata),
+    lastUpdate: Date.now()
+  });
+}
+
+// Track WebSocket connections in memory (per instance)
 const webClients = new Set();
+const cameraClients = new Map(); // cameraId -> ws connection
 
 // Middleware
 app.use(express.json());
@@ -53,28 +94,44 @@ app.use(express.static(path.join(__dirname, '../dist')));
 // API Routes
 
 // GET /api/session - Return current session metadata
-app.get('/api/session', (req, res) => {
-  res.json({
-    success: true,
-    filmGuid: sessionState.filmGuid,
-    productionCompanyGuid: sessionState.productionCompanyGuid
-  });
+app.get('/api/session', async (req, res) => {
+  try {
+    const filmGuid = await valkey.get('session:filmGuid');
+    const productionCompanyGuid = await valkey.get('session:productionCompanyGuid');
+    
+    res.json({
+      success: true,
+      filmGuid,
+      productionCompanyGuid
+    });
+  } catch (error) {
+    console.error('❌ Error fetching session:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch session' });
+  }
 });
 
 // POST /api/session - Update session metadata
-app.post('/api/session', (req, res) => {
-  const { filmGuid, productionCompanyGuid } = req.body;
-  
-  if (filmGuid) sessionState.filmGuid = filmGuid;
-  if (productionCompanyGuid) sessionState.productionCompanyGuid = productionCompanyGuid;
-  
-  console.log('✅ Session updated:', { filmGuid: sessionState.filmGuid, productionCompanyGuid: sessionState.productionCompanyGuid });
-  
-  res.json({
-    success: true,
-    filmGuid: sessionState.filmGuid,
-    productionCompanyGuid: sessionState.productionCompanyGuid
-  });
+app.post('/api/session', async (req, res) => {
+  try {
+    const { filmGuid, productionCompanyGuid } = req.body;
+    
+    if (filmGuid) await valkey.set('session:filmGuid', filmGuid);
+    if (productionCompanyGuid) await valkey.set('session:productionCompanyGuid', productionCompanyGuid);
+    
+    const updatedFilmGuid = await valkey.get('session:filmGuid');
+    const updatedProductionGuid = await valkey.get('session:productionCompanyGuid');
+    
+    console.log('✅ Session updated:', { filmGuid: updatedFilmGuid, productionCompanyGuid: updatedProductionGuid });
+    
+    res.json({
+      success: true,
+      filmGuid: updatedFilmGuid,
+      productionCompanyGuid: updatedProductionGuid
+    });
+  } catch (error) {
+    console.error('❌ Error updating session:', error);
+    res.status(500).json({ success: false, error: 'Failed to update session' });
+  }
 });
 
 // GET /api/qr/:cameraId - Generate QR code for camera
@@ -85,17 +142,20 @@ app.get('/api/qr/:cameraId', async (req, res) => {
     return res.status(400).json({ success: false, error: 'Invalid camera ID' });
   }
   
-  const connectionData = {
-    serverIP: SERVER_IP,
-    port: PORT,
-    filmGuid: sessionState.filmGuid,
-    productionCompanyGuid: sessionState.productionCompanyGuid,
-    cameraId: cameraId,
-    cameraName: `Camera ${cameraId}`,
-    timestamp: new Date().toISOString()
-  };
-  
   try {
+    const filmGuid = await valkey.get('session:filmGuid');
+    const productionCompanyGuid = await valkey.get('session:productionCompanyGuid');
+    
+    const connectionData = {
+      serverIP: SERVER_IP,
+      port: PORT,
+      filmGuid,
+      productionCompanyGuid,
+      cameraId: cameraId,
+      cameraName: `Camera ${cameraId}`,
+      timestamp: new Date().toISOString()
+    };
+    
     const qrCode = await QRCode.toDataURL(JSON.stringify(connectionData), {
       width: 300,
       margin: 2,
@@ -117,17 +177,30 @@ app.get('/api/qr/:cameraId', async (req, res) => {
 });
 
 // GET /api/cameras - Get status of all cameras
-app.get('/api/cameras', (req, res) => {
-  const cameraStatus = {};
-  
-  for (const [id, camera] of Object.entries(sessionState.cameras)) {
-    cameraStatus[id] = {
-      connected: camera.connected,
-      metadata: camera.metadata
-    };
+app.get('/api/cameras', async (req, res) => {
+  try {
+    const cameraStatus = {};
+    
+    for (let i = 1; i <= 3; i++) {
+      const state = await getCameraState(i);
+      cameraStatus[i] = state;
+    }
+    
+    res.json({ success: true, cameras: cameraStatus });
+  } catch (error) {
+    console.error('❌ Error fetching cameras:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch cameras' });
   }
-  
-  res.json({ success: true, cameras: cameraStatus });
+});
+
+// Health check endpoint
+app.get('/health', async (req, res) => {
+  try {
+    await valkey.ping();
+    res.json({ status: 'healthy', valkey: 'connected' });
+  } catch (error) {
+    res.status(503).json({ status: 'unhealthy', valkey: 'disconnected' });
+  }
 });
 
 // WebSocket handling
@@ -137,7 +210,7 @@ wss.on('connection', (ws) => {
   let clientType = null;
   let cameraId = null;
   
-  ws.on('message', (data) => {
+  ws.on('message', async (data) => {
     try {
       const message = JSON.parse(data.toString());
       console.log('📨 Received message:', message.type, message.cameraId ? `(Camera ${message.cameraId})` : '');
@@ -148,10 +221,9 @@ wss.on('connection', (ws) => {
           cameraId = message.cameraId;
           clientType = 'camera';
           
-          if (sessionState.cameras[cameraId]) {
-            sessionState.cameras[cameraId].connected = true;
-            sessionState.cameras[cameraId].wsClient = ws;
-            sessionState.cameras[cameraId].metadata = message.metadata || {};
+          if ([1, 2, 3].includes(cameraId)) {
+            cameraClients.set(cameraId, ws);
+            await setCameraState(cameraId, true, message.metadata || {});
             
             console.log(`📷 Camera ${cameraId} connected`);
             
@@ -172,12 +244,10 @@ wss.on('connection', (ws) => {
           
           // Send current camera states
           const cameraStates = {};
-          for (const [id, camera] of Object.entries(sessionState.cameras)) {
-            if (camera.connected) {
-              cameraStates[id] = {
-                connected: true,
-                metadata: camera.metadata
-              };
+          for (let i = 1; i <= 3; i++) {
+            const state = await getCameraState(i);
+            if (state.connected) {
+              cameraStates[i] = state;
             }
           }
           
@@ -191,12 +261,12 @@ wss.on('connection', (ws) => {
         case 'answer':
         case 'candidate':
           // WebRTC signaling - route between camera and web client
-          if (message.cameraId && sessionState.cameras[message.cameraId]) {
+          if (message.cameraId) {
             if (clientType === 'web-client') {
               // From web client to camera
-              const targetCamera = sessionState.cameras[message.cameraId];
-              if (targetCamera.wsClient && targetCamera.wsClient.readyState === 1) {
-                targetCamera.wsClient.send(JSON.stringify(message));
+              const targetCamera = cameraClients.get(message.cameraId);
+              if (targetCamera && targetCamera.readyState === 1) {
+                targetCamera.send(JSON.stringify(message));
                 console.log(`📤 Forwarded ${message.type} to Camera ${message.cameraId}`);
               }
             } else if (clientType === 'camera') {
@@ -210,10 +280,10 @@ wss.on('connection', (ws) => {
         case 'start-recording':
         case 'stop-recording':
           // Recording control - forward to camera
-          if (message.cameraId && sessionState.cameras[message.cameraId]) {
-            const targetCamera = sessionState.cameras[message.cameraId];
-            if (targetCamera.wsClient && targetCamera.wsClient.readyState === 1) {
-              targetCamera.wsClient.send(JSON.stringify(message));
+          if (message.cameraId) {
+            const targetCamera = cameraClients.get(message.cameraId);
+            if (targetCamera && targetCamera.readyState === 1) {
+              targetCamera.send(JSON.stringify(message));
               console.log(`🎬 ${message.type} sent to Camera ${message.cameraId}`);
             }
           }
@@ -227,13 +297,12 @@ wss.on('connection', (ws) => {
     }
   });
   
-  ws.on('close', () => {
+  ws.on('close', async () => {
     console.log('🔌 WebSocket disconnected');
     
     if (clientType === 'camera' && cameraId) {
-      sessionState.cameras[cameraId].connected = false;
-      sessionState.cameras[cameraId].wsClient = null;
-      sessionState.cameras[cameraId].metadata = {};
+      cameraClients.delete(cameraId);
+      await setCameraState(cameraId, false, {});
       
       console.log(`📷 Camera ${cameraId} disconnected`);
       
@@ -263,25 +332,61 @@ function broadcastToWebClients(message) {
   });
 }
 
-// Start server
-server.listen(PORT, () => {
-  console.log('');
-  console.log('🎬 ═══════════════════════════════════════════════════════');
-  console.log('🎬  Film Production Multi-Camera Server');
-  console.log('🎬 ═══════════════════════════════════════════════════════');
-  console.log('');
-  console.log(`🌐 Server running on: http://${SERVER_IP}:${PORT}`);
-  console.log(`🔌 WebSocket endpoint: ws://${SERVER_IP}:${PORT}/signaling`);
-  console.log('');
-  console.log(`📋 Film GUID: ${sessionState.filmGuid}`);
-  console.log(`🏢 Production GUID: ${sessionState.productionCompanyGuid}`);
-  console.log('');
-  console.log('🎥 Camera Status:');
-  console.log('   Camera 1: Waiting');
-  console.log('   Camera 2: Waiting');
-  console.log('   Camera 3: Waiting');
-  console.log('');
-  console.log('📱 Scan QR codes from the web interface to connect cameras');
-  console.log('🎬 ═══════════════════════════════════════════════════════');
-  console.log('');
+// Initialize and start server
+async function startServer() {
+  try {
+    await initializeSession();
+    
+    const filmGuid = await valkey.get('session:filmGuid');
+    const productionGuid = await valkey.get('session:productionCompanyGuid');
+    
+    server.listen(PORT, () => {
+      console.log('');
+      console.log('🎬 ═══════════════════════════════════════════════════════');
+      console.log('🎬  Film Production Multi-Camera Server (Docker + Valkey)');
+      console.log('🎬 ═══════════════════════════════════════════════════════');
+      console.log('');
+      console.log(`🌐 Server running on: http://${SERVER_IP}:${PORT}`);
+      console.log(`🔌 WebSocket endpoint: ws://${SERVER_IP}:${PORT}/signaling`);
+      console.log(`🗄️  Valkey: ${process.env.VALKEY_HOST || 'localhost'}:${process.env.VALKEY_PORT || 6379}`);
+      console.log('');
+      console.log(`📋 Film GUID: ${filmGuid}`);
+      console.log(`🏢 Production GUID: ${productionGuid}`);
+      console.log('');
+      console.log('🎥 Camera Status:');
+      console.log('   Camera 1: Waiting');
+      console.log('   Camera 2: Waiting');
+      console.log('   Camera 3: Waiting');
+      console.log('');
+      console.log('📱 Scan QR codes from the web interface to connect cameras');
+      console.log('🎬 ═══════════════════════════════════════════════════════');
+      console.log('');
+    });
+  } catch (error) {
+    console.error('❌ Failed to start server:', error);
+    process.exit(1);
+  }
+}
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('📴 SIGTERM received, shutting down gracefully...');
+  
+  // Close all WebSocket connections
+  wss.clients.forEach((client) => {
+    client.close();
+  });
+  
+  // Close server
+  server.close(() => {
+    console.log('Server closed');
+  });
+  
+  // Close Valkey connection
+  await valkey.quit();
+  console.log('Valkey connection closed');
+  
+  process.exit(0);
 });
+
+startServer();

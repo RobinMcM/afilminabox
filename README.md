@@ -1,6 +1,8 @@
 # afilminabox - Film Production Multi-Camera Server
 
-Professional multi-camera streaming system for film production with WebSocket signaling, WebRTC video streams, and QR code-based iPhone camera connections.
+Professional multi-camera streaming system for film production with WebSocket signaling, WebRTC video streams, QR code-based iPhone camera connections, and distributed state management with Valkey (Redis).
+
+**🐳 Now with Docker support for production deployment!**
 
 ## 🎬 Features
 
@@ -41,6 +43,45 @@ This will start:
 npm run build
 npm run preview
 ```
+
+## 🐳 Docker Deployment (Recommended for Production)
+
+### Quick Start with Docker
+
+```bash
+# 1. Clone repository
+git clone git@github.com:RobinMcM/afilminabox.git
+cd afilminabox
+
+# 2. Configure environment
+cp .env.example .env
+# Edit .env with your settings
+
+# 3. Start with Docker Compose
+docker-compose up -d
+
+# 4. Access application
+# - Frontend: http://localhost
+# - API: http://localhost:8080
+# - Health: http://localhost/health
+```
+
+### What's Included
+
+- **Valkey (Redis)**: Distributed state management for horizontal scaling
+- **Nginx**: Reverse proxy with WebSocket support
+- **Application**: Containerized Node.js app with health checks
+- **Volumes**: Persistent storage for Valkey data
+
+### Docker Benefits
+
+✅ **Horizontally Scalable**: Run multiple instances with load balancing  
+✅ **State Management**: Valkey stores session and camera state  
+✅ **Production Ready**: Health checks, auto-restart, logging  
+✅ **Easy Deployment**: One command to deploy everything  
+✅ **Isolated Environment**: No dependency conflicts  
+
+📖 **Full Docker Documentation**: See [DOCKER_DEPLOYMENT.md](DOCKER_DEPLOYMENT.md)
 
 ## 📱 How to Use
 
