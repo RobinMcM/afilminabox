@@ -46,7 +46,10 @@ function App() {
   
   const connectWebSocket = () => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.hostname}:${window.location.port || 8080}/signaling`;
+    // In production (HTTPS), use default port 443 (no port specified)
+    // In development, use explicit port
+    const port = window.location.port ? `:${window.location.port}` : '';
+    const wsUrl = `${protocol}//${window.location.hostname}${port}/signaling`;
     
     console.log('🔌 Connecting to WebSocket:', wsUrl);
     
