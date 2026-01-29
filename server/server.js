@@ -299,6 +299,24 @@ wss.on('connection', (ws) => {
         case 'candidate':
           // WebRTC signaling - route between camera and web client
           if (message.cameraId) {
+            // Auto-detect camera from offer if not registered yet
+            if (message.type === 'offer' && !clientType && [1, 2, 3].includes(message.cameraId)) {
+              console.log(`🎥 Auto-registering Camera ${message.cameraId} from offer`);
+              clientType = 'camera';
+              cameraId = message.cameraId;
+              cameraClients.set(cameraId, ws);
+              await setCameraState(cameraId, true, message.metadata || {});
+              
+              // Broadcast camera connected
+              const broadcastMessage = {
+                type: 'camera-connected',
+                cameraId: cameraId,
+                metadata: message.metadata || {}
+              };
+              console.log('📡 Broadcasting message:', JSON.stringify(broadcastMessage));
+              broadcastToWebClients(broadcastMessage);
+            }
+            
             if (clientType === 'web-client') {
               // From web client to camera
               const targetCamera = cameraClients.get(message.cameraId);
