@@ -123,12 +123,17 @@ function App() {
             metadata: message.metadata
           }
         }));
-        // Create WebRTC peer connection and send offer
-        await createPeerConnection(message.cameraId);
+        // Just mark as connected, wait for camera to send offer
+        console.log(`📷 Camera ${message.cameraId} connected - waiting for offer`);
         break;
         
       case 'camera-disconnected':
         handleCameraDisconnect(message.cameraId);
+        break;
+        
+      case 'offer':
+        // Camera is sending an offer, we need to create answer
+        await handleOffer(message.cameraId, message.offer || message.sdp);
         break;
         
       case 'answer':
@@ -205,6 +210,75 @@ function App() {
       }
     } catch (error) {
       console.error(`❌ Error creating offer for Camera ${cameraId}:`, error);
+    }
+  };
+  
+  const handleOffer = async (cameraId, offer) => {
+    console.log(`📥 Received offer from Camera ${cameraId}`);
+    
+    try {
+      // Create peer connection if it doesn't exist
+      const pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' }
+        ]
+      });
+      
+      // Handle incoming tracks
+      pc.ontrack = (event) => {
+        console.log(`📹 Received track from Camera ${cameraId}:`, event.track.kind);
+        setCameras(prev => ({
+          ...prev,
+          [cameraId]: { ...prev[cameraId], stream: event.streams[0] }
+        }));
+      };
+      
+      // Handle ICE candidates
+      pc.onicecandidate = (event) => {
+        if (event.candidate && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          console.log(`🧊 Sending ICE candidate for Camera ${cameraId}`);
+          wsRef.current.send(JSON.stringify({
+            type: 'candidate',
+            cameraId: cameraId,
+            candidate: event.candidate
+          }));
+        }
+      };
+      
+      // Handle connection state changes
+      pc.onconnectionstatechange = () => {
+        console.log(`📡 Camera ${cameraId} connection state:`, pc.connectionState);
+        if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+          handleCameraDisconnect(cameraId);
+        }
+      };
+      
+      // Store peer connection
+      setCameras(prev => ({
+        ...prev,
+        [cameraId]: { ...prev[cameraId], pc: pc }
+      }));
+      
+      // Set remote description from offer
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      console.log(`✅ Set remote description from Camera ${cameraId} offer`);
+      
+      // Create answer
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      
+      // Send answer back to camera
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({
+          type: 'answer',
+          cameraId: cameraId,
+          answer: answer
+        }));
+        console.log(`📤 Sent answer to Camera ${cameraId}`);
+      }
+    } catch (error) {
+      console.error(`❌ Error handling offer from Camera ${cameraId}:`, error);
     }
   };
   
