@@ -8,58 +8,51 @@ function VideoGallery({ session }) {
 
   useEffect(() => {
     fetchRecordings();
+    
+    // Listen for storage events (when recordings are added from other tabs)
+    const handleStorageChange = (e) => {
+      if (e.key === 'recordings') {
+        fetchRecordings();
+      }
+    };
+    
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
-  const fetchRecordings = async () => {
+  const fetchRecordings = () => {
     try {
-      const response = await fetch('/api/recordings');
-      const data = await response.json();
-      if (data.success) {
-        setRecordings(data.recordings);
-      }
+      // Read from localStorage instead of API
+      const localRecordings = JSON.parse(localStorage.getItem('recordings') || '[]');
+      setRecordings(localRecordings);
+      console.log(`📹 Loaded ${localRecordings.length} recordings from localStorage`);
     } catch (error) {
-      console.error('❌ Error fetching recordings:', error);
+      console.error('❌ Error loading recordings from localStorage:', error);
+      setRecordings([]);
     } finally {
       setLoading(false);
     }
   };
 
-  const deleteRecording = async (id) => {
-    if (!confirm('Are you sure you want to delete this recording?')) return;
+  const deleteRecording = (id) => {
+    if (!confirm('Remove this recording from the list?\n\nNote: This only removes the entry from the gallery. The video file remains in your Downloads folder.')) return;
     
     try {
-      const response = await fetch(`/api/recordings/${id}`, {
-        method: 'DELETE'
-      });
-      
-      if (response.ok) {
-        setRecordings(prev => prev.filter(r => r.id !== id));
-        console.log('✅ Recording deleted');
-      }
+      // Remove from localStorage
+      const updatedRecordings = recordings.filter(r => r.id !== id);
+      localStorage.setItem('recordings', JSON.stringify(updatedRecordings));
+      setRecordings(updatedRecordings);
+      console.log('✅ Recording removed from gallery');
     } catch (error) {
       console.error('❌ Error deleting recording:', error);
     }
   };
 
-  const processRecording = async (id, type) => {
-    try {
-      const response = await fetch(`/api/recordings/${id}/process`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type })
-      });
-      
-      const data = await response.json();
-      if (data.success) {
-        console.log('✅ Processing started:', data.jobId);
-        // Update recording status
-        setRecordings(prev => prev.map(r => 
-          r.id === id ? { ...r, status: 'processing' } : r
-        ));
-      }
-    } catch (error) {
-      console.error('❌ Error processing recording:', error);
-    }
+  const processRecording = (id, type) => {
+    alert(`Processing feature coming soon!\n\nTo process this video:\n1. Locate the file in your Downloads folder\n2. Upload to media-handler API\n3. Apply AI background removal\n\nFile: ${recordings.find(r => r.id === id)?.fileName}`);
+    
+    // TODO: Implement manual upload to server for processing
+    // For now, this is just informational
   };
 
   const filteredRecordings = recordings.filter(r => {
@@ -90,13 +83,14 @@ function VideoGallery({ session }) {
 
   const getStatusBadge = (status) => {
     const badges = {
+      local: { label: 'Saved', class: 'status-local' },
       raw: { label: 'Raw', class: 'status-raw' },
       processing: { label: 'Processing', class: 'status-processing' },
       processed: { label: 'Processed', class: 'status-processed' },
       failed: { label: 'Failed', class: 'status-failed' }
     };
     
-    const badge = badges[status] || badges.raw;
+    const badge = badges[status] || badges.local;
     return <span className={`recording-status ${badge.class}`}>{badge.label}</span>;
   };
 
@@ -158,18 +152,9 @@ function VideoGallery({ session }) {
           {filteredRecordings.map(recording => (
             <div key={recording.id} className="recording-card">
               <div className="recording-thumbnail">
-                {recording.thumbnailPath ? (
-                  <img 
-                    src={`/api/recordings/${recording.id}/thumbnail`} 
-                    alt={`Recording ${recording.id}`}
-                    onError={(e) => {
-                      e.target.style.display = 'none';
-                      e.target.nextSibling.style.display = 'flex';
-                    }}
-                  />
-                ) : null}
-                <div className="thumbnail-placeholder" style={{ display: recording.thumbnailPath ? 'none' : 'flex' }}>
+                <div className="thumbnail-placeholder">
                   <span className="placeholder-icon">🎥</span>
+                  <div className="local-badge">LOCAL</div>
                 </div>
                 <div className="thumbnail-overlay">
                   <span className="camera-badge">Camera {recording.cameraId}</span>
@@ -204,34 +189,18 @@ function VideoGallery({ session }) {
               </div>
 
               <div className="recording-actions">
-                {recording.status === 'raw' && (
-                  <button 
-                    className="action-btn btn-process"
-                    onClick={() => processRecording(recording.id, 'remove-background')}
-                    title="Remove background"
-                  >
-                    <span className="btn-icon">🎨</span>
-                    Process
-                  </button>
-                )}
-                
-                <a 
-                  href={`/api/recordings/${recording.id}/download`}
-                  className="action-btn btn-download"
-                  download
-                  title="Download"
-                >
-                  <span className="btn-icon">⬇️</span>
-                  Download
-                </a>
+                <div className="action-info">
+                  <span className="info-icon">📁</span>
+                  <span className="info-text">File: {recording.fileName}</span>
+                </div>
                 
                 <button 
                   className="action-btn btn-delete"
                   onClick={() => deleteRecording(recording.id)}
-                  title="Delete"
+                  title="Remove from list"
                 >
                   <span className="btn-icon">🗑️</span>
-                  Delete
+                  Remove
                 </button>
               </div>
             </div>

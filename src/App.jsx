@@ -7,9 +7,9 @@ function App() {
   const [currentView, setCurrentView] = useState('control'); // 'control' or 'gallery'
   
   const [cameras, setCameras] = useState({
-    1: { connected: false, recording: false, stream: null, pc: null, metadata: {} },
-    2: { connected: false, recording: false, stream: null, pc: null, metadata: {} },
-    3: { connected: false, recording: false, stream: null, pc: null, metadata: {} }
+    1: { connected: false, recording: false, stream: null, pc: null, metadata: {}, mediaRecorder: null, recordedChunks: [] },
+    2: { connected: false, recording: false, stream: null, pc: null, metadata: {}, mediaRecorder: null, recordedChunks: [] },
+    3: { connected: false, recording: false, stream: null, pc: null, metadata: {}, mediaRecorder: null, recordedChunks: [] }
   });
   
   const [session, setSession] = useState({
@@ -409,22 +409,151 @@ function App() {
   
   const toggleRecording = (cameraId) => {
     const camera = cameras[cameraId];
-    const newRecordingState = !camera.recording;
     
-    // Update local state
-    setCameras(prev => ({
-      ...prev,
-      [cameraId]: { ...prev[cameraId], recording: newRecordingState }
-    }));
-    
-    // Send message to camera
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: newRecordingState ? 'start-recording' : 'stop-recording',
-        cameraId: cameraId
-      }));
-      console.log(`🎬 ${newRecordingState ? 'Started' : 'Stopped'} recording for Camera ${cameraId}`);
+    if (!camera.recording) {
+      // Start recording
+      startLocalRecording(cameraId);
+    } else {
+      // Stop recording
+      stopLocalRecording(cameraId);
     }
+  };
+  
+  const startLocalRecording = (cameraId) => {
+    const camera = cameras[cameraId];
+    
+    if (!camera.stream) {
+      console.error(`❌ No stream available for Camera ${cameraId}`);
+      return;
+    }
+    
+    try {
+      // Create MediaRecorder for local recording
+      const options = {
+        mimeType: 'video/webm;codecs=vp9,opus',
+        videoBitsPerSecond: 2500000
+      };
+      
+      // Fallback to vp8 if vp9 not supported
+      if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+        options.mimeType = 'video/webm;codecs=vp8,opus';
+      }
+      
+      const mediaRecorder = new MediaRecorder(camera.stream, options);
+      const chunks = [];
+      
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          chunks.push(event.data);
+        }
+      };
+      
+      mediaRecorder.onstop = () => {
+        saveRecordingToPC(cameraId, chunks);
+      };
+      
+      mediaRecorder.start(1000); // Collect data every second
+      
+      // Update state with mediaRecorder
+      setCameras(prev => ({
+        ...prev,
+        [cameraId]: {
+          ...prev[cameraId],
+          recording: true,
+          mediaRecorder: mediaRecorder,
+          recordedChunks: chunks,
+          recordingStartTime: Date.now()
+        }
+      }));
+      
+      console.log(`🎬 Started local recording for Camera ${cameraId}`);
+      
+      // Also notify the iPhone camera (optional - for status sync)
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({
+          type: 'start-recording',
+          cameraId: cameraId
+        }));
+      }
+    } catch (error) {
+      console.error(`❌ Error starting recording for Camera ${cameraId}:`, error);
+    }
+  };
+  
+  const stopLocalRecording = (cameraId) => {
+    const camera = cameras[cameraId];
+    
+    if (camera.mediaRecorder && camera.mediaRecorder.state !== 'inactive') {
+      camera.mediaRecorder.stop();
+      
+      setCameras(prev => ({
+        ...prev,
+        [cameraId]: { ...prev[cameraId], recording: false }
+      }));
+      
+      console.log(`⏹️ Stopped local recording for Camera ${cameraId}`);
+      
+      // Notify iPhone camera (optional)
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({
+          type: 'stop-recording',
+          cameraId: cameraId
+        }));
+      }
+    }
+  };
+  
+  const saveRecordingToPC = (cameraId, chunks) => {
+    if (chunks.length === 0) {
+      console.warn(`⚠️ No data recorded for Camera ${cameraId}`);
+      return;
+    }
+    
+    const camera = cameras[cameraId];
+    const blob = new Blob(chunks, { type: 'video/webm' });
+    const timestamp = Date.now();
+    const fileName = `camera-${cameraId}-${timestamp}.webm`;
+    
+    // Auto-download to PC
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    
+    // Cleanup
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 100);
+    
+    // Calculate duration (rough estimate based on recording time)
+    const duration = camera.recordingStartTime 
+      ? Math.floor((Date.now() - camera.recordingStartTime) / 1000)
+      : 0;
+    
+    // Save metadata to localStorage
+    const recording = {
+      id: `${Date.now()}-${cameraId}`,
+      cameraId: cameraId,
+      fileName: fileName,
+      timestamp: new Date().toISOString(),
+      duration: duration,
+      fileSize: blob.size,
+      filmGuid: session.filmGuid,
+      productionCompanyGuid: session.productionCompanyGuid,
+      status: 'local'
+    };
+    
+    // Get existing recordings from localStorage
+    const existingRecordings = JSON.parse(localStorage.getItem('recordings') || '[]');
+    existingRecordings.unshift(recording); // Add to beginning (newest first)
+    localStorage.setItem('recordings', JSON.stringify(existingRecordings));
+    
+    console.log(`✅ Recording saved: ${fileName}`);
+    console.log(`💾 Metadata saved to localStorage`);
   };
   
   return (
