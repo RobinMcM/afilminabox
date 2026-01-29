@@ -95,6 +95,22 @@ const cameraClients = new Map(); // cameraId -> ws connection
 
 // Middleware
 app.use(express.json());
+
+// Content Security Policy headers for WebSocket support
+app.use((req, res, next) => {
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; " +
+    "connect-src 'self' wss://afilminabox.com ws://localhost:* wss://localhost:*; " +
+    "script-src 'self' 'unsafe-inline'; " +
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+    "font-src 'self' https://fonts.gstatic.com; " +
+    "img-src 'self' data: https:; " +
+    "media-src 'self' blob:;"
+  );
+  next();
+});
+
 app.use(express.static(path.join(__dirname, '../dist')));
 
 // API Routes
