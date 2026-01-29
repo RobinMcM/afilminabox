@@ -133,7 +133,9 @@ function App() {
         
       case 'offer':
         // Camera is sending an offer, we need to create answer
-        await handleOffer(message.cameraId, message.offer || message.sdp);
+        // Construct proper SDP description object
+        const offerSdp = message.offer || { type: 'offer', sdp: message.sdp };
+        await handleOffer(message.cameraId, offerSdp);
         break;
         
       case 'answer':
@@ -215,8 +217,16 @@ function App() {
   
   const handleOffer = async (cameraId, offer) => {
     console.log(`📥 Received offer from Camera ${cameraId}`);
+    console.log(`📋 Offer format:`, offer);
     
     try {
+      // Ensure offer is in correct format
+      const sdpDescription = typeof offer === 'string' 
+        ? { type: 'offer', sdp: offer }
+        : offer;
+      
+      console.log(`📋 SDP Description:`, { type: sdpDescription.type, sdpLength: sdpDescription.sdp?.length });
+      
       // Create peer connection if it doesn't exist
       const pc = new RTCPeerConnection({
         iceServers: [
@@ -254,6 +264,11 @@ function App() {
         }
       };
       
+      // Handle ICE connection state
+      pc.oniceconnectionstatechange = () => {
+        console.log(`🧊 Camera ${cameraId} ICE state:`, pc.iceConnectionState);
+      };
+      
       // Store peer connection
       setCameras(prev => ({
         ...prev,
@@ -261,24 +276,26 @@ function App() {
       }));
       
       // Set remote description from offer
-      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      await pc.setRemoteDescription(new RTCSessionDescription(sdpDescription));
       console.log(`✅ Set remote description from Camera ${cameraId} offer`);
       
       // Create answer
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
+      console.log(`✅ Created answer for Camera ${cameraId}`);
       
       // Send answer back to camera
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({
           type: 'answer',
           cameraId: cameraId,
-          answer: answer
+          sdp: answer.sdp
         }));
         console.log(`📤 Sent answer to Camera ${cameraId}`);
       }
     } catch (error) {
       console.error(`❌ Error handling offer from Camera ${cameraId}:`, error);
+      console.error(`❌ Error details:`, error.message, error.stack);
     }
   };
   
