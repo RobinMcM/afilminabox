@@ -40,7 +40,12 @@ valkey.on('error', (err) => {
   console.error('❌ Valkey connection error:', err);
 });
 
-// Get local network IP
+// Server domain/IP configuration
+// Use environment variable or default to domain name for production
+// Falls back to local IP detection for development
+const SERVER_DOMAIN = process.env.SERVER_DOMAIN || process.env.SERVER_IP || 'afilminabox.com';
+
+// Get local network IP (fallback for development)
 function getLocalIP() {
   const nets = networkInterfaces();
   for (const name of Object.keys(nets)) {
@@ -54,7 +59,8 @@ function getLocalIP() {
   return 'localhost';
 }
 
-const SERVER_IP = getLocalIP();
+// Use domain in production, local IP in development
+const SERVER_IP = process.env.NODE_ENV === 'production' ? SERVER_DOMAIN : (process.env.SERVER_DOMAIN || getLocalIP());
 
 // Initialize session in Valkey if not exists
 async function initializeSession() {
@@ -146,9 +152,16 @@ app.get('/api/qr/:cameraId', async (req, res) => {
     const filmGuid = await valkey.get('session:filmGuid');
     const productionCompanyGuid = await valkey.get('session:productionCompanyGuid');
     
+    // Determine protocol based on environment
+    const isProduction = process.env.NODE_ENV === 'production';
+    const protocol = isProduction ? 'https' : 'http';
+    const wsProtocol = isProduction ? 'wss' : 'ws';
+    
     const connectionData = {
       serverIP: SERVER_IP,
-      port: PORT,
+      port: isProduction ? 443 : PORT, // Use 443 for HTTPS in production
+      protocol: protocol,
+      wsProtocol: wsProtocol,
       filmGuid,
       productionCompanyGuid,
       cameraId: cameraId,
