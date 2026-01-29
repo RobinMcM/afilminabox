@@ -96,22 +96,41 @@ const cameraClients = new Map(); // cameraId -> ws connection
 // Middleware
 app.use(express.json());
 
-// Content Security Policy headers for WebSocket support
+// Serve static files with proper options (disable default CSP)
+app.use(express.static(path.join(__dirname, '../dist'), {
+  setHeaders: (res, filepath) => {
+    // Set proper Content Security Policy
+    res.setHeader(
+      'Content-Security-Policy',
+      "default-src 'self'; " +
+      "connect-src 'self' wss://afilminabox.com wss://*.afilminabox.com ws://localhost:* wss://localhost:*; " +
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+      "font-src 'self' https://fonts.gstatic.com; " +
+      "img-src 'self' data: https: blob:; " +
+      "media-src 'self' blob: mediastream:; " +
+      "worker-src 'self' blob:;"
+    );
+  }
+}));
+
+// Content Security Policy for API routes
 app.use((req, res, next) => {
-  res.setHeader(
-    'Content-Security-Policy',
-    "default-src 'self'; " +
-    "connect-src 'self' wss://afilminabox.com ws://localhost:* wss://localhost:*; " +
-    "script-src 'self' 'unsafe-inline'; " +
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-    "font-src 'self' https://fonts.gstatic.com; " +
-    "img-src 'self' data: https:; " +
-    "media-src 'self' blob:;"
-  );
+  if (!res.headersSent) {
+    res.setHeader(
+      'Content-Security-Policy',
+      "default-src 'self'; " +
+      "connect-src 'self' wss://afilminabox.com wss://*.afilminabox.com ws://localhost:* wss://localhost:*; " +
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+      "font-src 'self' https://fonts.gstatic.com; " +
+      "img-src 'self' data: https: blob:; " +
+      "media-src 'self' blob: mediastream:; " +
+      "worker-src 'self' blob:;"
+    );
+  }
   next();
 });
-
-app.use(express.static(path.join(__dirname, '../dist')));
 
 // API Routes
 
