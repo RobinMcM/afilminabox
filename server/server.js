@@ -224,6 +224,188 @@ app.get('/api/cameras', async (req, res) => {
   }
 });
 
+// ===================================
+// Recording Management Endpoints
+// ===================================
+
+// GET /api/recordings - List all recordings
+app.get('/api/recordings', async (req, res) => {
+  try {
+    // Get all recording keys from Valkey
+    const keys = await valkey.keys('recording:*');
+    const recordings = [];
+    
+    for (const key of keys) {
+      const data = await valkey.hgetall(key);
+      if (data && data.id) {
+        recordings.push({
+          id: data.id,
+          filmGuid: data.filmGuid,
+          productionCompanyGuid: data.productionCompanyGuid,
+          cameraId: parseInt(data.cameraId),
+          timestamp: data.timestamp,
+          duration: parseFloat(data.duration || 0),
+          fileSize: parseInt(data.fileSize || 0),
+          filePath: data.filePath,
+          thumbnailPath: data.thumbnailPath,
+          status: data.status || 'raw'
+        });
+      }
+    }
+    
+    // Sort by timestamp (newest first)
+    recordings.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    
+    res.json({ success: true, recordings });
+  } catch (error) {
+    console.error('❌ Error fetching recordings:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch recordings' });
+  }
+});
+
+// GET /api/recordings/:id - Get single recording
+app.get('/api/recordings/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const data = await valkey.hgetall(`recording:${id}`);
+    
+    if (!data || !data.id) {
+      return res.status(404).json({ success: false, error: 'Recording not found' });
+    }
+    
+    res.json({
+      success: true,
+      recording: {
+        id: data.id,
+        filmGuid: data.filmGuid,
+        productionCompanyGuid: data.productionCompanyGuid,
+        cameraId: parseInt(data.cameraId),
+        timestamp: data.timestamp,
+        duration: parseFloat(data.duration || 0),
+        fileSize: parseInt(data.fileSize || 0),
+        filePath: data.filePath,
+        thumbnailPath: data.thumbnailPath,
+        status: data.status || 'raw'
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error fetching recording:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch recording' });
+  }
+});
+
+// GET /api/recordings/:id/thumbnail - Get recording thumbnail
+app.get('/api/recordings/:id/thumbnail', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const data = await valkey.hgetall(`recording:${id}`);
+    
+    if (!data || !data.thumbnailPath) {
+      return res.status(404).sendFile(path.join(__dirname, '../public/placeholder-thumbnail.jpg'));
+    }
+    
+    res.sendFile(data.thumbnailPath);
+  } catch (error) {
+    console.error('❌ Error fetching thumbnail:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch thumbnail' });
+  }
+});
+
+// GET /api/recordings/:id/download - Download recording
+app.get('/api/recordings/:id/download', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const data = await valkey.hgetall(`recording:${id}`);
+    
+    if (!data || !data.filePath) {
+      return res.status(404).json({ success: false, error: 'Recording not found' });
+    }
+    
+    res.download(data.filePath, `recording-${id}.mp4`);
+  } catch (error) {
+    console.error('❌ Error downloading recording:', error);
+    res.status(500).json({ success: false, error: 'Failed to download recording' });
+  }
+});
+
+// POST /api/recordings/:id/process - Submit recording for processing
+app.post('/api/recordings/:id/process', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { type } = req.body; // 'remove-background' or 'add-backdrop'
+    
+    const recordingData = await valkey.hgetall(`recording:${id}`);
+    
+    if (!recordingData || !recordingData.id) {
+      return res.status(404).json({ success: false, error: 'Recording not found' });
+    }
+    
+    // Create processing job
+    const jobId = uuidv4();
+    await valkey.hmset(`job:${jobId}`, {
+      id: jobId,
+      recordingId: id,
+      type,
+      status: 'queued',
+      createdAt: new Date().toISOString()
+    });
+    
+    // Update recording status
+    await valkey.hset(`recording:${id}`, 'status', 'processing');
+    
+    console.log(`🎨 Processing job created: ${jobId} for recording ${id}`);
+    
+    // TODO: Send to media-handler API for actual processing
+    
+    res.json({ success: true, jobId, status: 'processing' });
+  } catch (error) {
+    console.error('❌ Error processing recording:', error);
+    res.status(500).json({ success: false, error: 'Failed to process recording' });
+  }
+});
+
+// DELETE /api/recordings/:id - Delete recording
+app.delete('/api/recordings/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const data = await valkey.hgetall(`recording:${id}`);
+    
+    if (!data || !data.id) {
+      return res.status(404).json({ success: false, error: 'Recording not found' });
+    }
+    
+    // Delete file if exists
+    if (data.filePath) {
+      const fs = await import('fs/promises');
+      try {
+        await fs.unlink(data.filePath);
+      } catch (err) {
+        console.warn('⚠️ Could not delete file:', err.message);
+      }
+    }
+    
+    // Delete thumbnail if exists
+    if (data.thumbnailPath) {
+      const fs = await import('fs/promises');
+      try {
+        await fs.unlink(data.thumbnailPath);
+      } catch (err) {
+        console.warn('⚠️ Could not delete thumbnail:', err.message);
+      }
+    }
+    
+    // Delete from Valkey
+    await valkey.del(`recording:${id}`);
+    
+    console.log(`🗑️ Deleted recording: ${id}`);
+    
+    res.json({ success: true, message: 'Recording deleted' });
+  } catch (error) {
+    console.error('❌ Error deleting recording:', error);
+    res.status(500).json({ success: false, error: 'Failed to delete recording' });
+  }
+});
+
 // Health check endpoint
 app.get('/health', async (req, res) => {
   try {

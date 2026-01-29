@@ -1,8 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import ProductionSetup from './components/ProductionSetup';
 import CameraGrid from './components/CameraGrid';
+import VideoGallery from './components/VideoGallery';
 
 function App() {
+  const [currentView, setCurrentView] = useState('control'); // 'control' or 'gallery'
+  
   const [cameras, setCameras] = useState({
     1: { connected: false, recording: false, stream: null, pc: null, metadata: {} },
     2: { connected: false, recording: false, stream: null, pc: null, metadata: {} },
@@ -427,24 +430,51 @@ function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1 className="app-title">
-          <span className="title-icon">🎬</span>
-          a Film in a Box
-        </h1>
-        <p className="app-subtitle">Film Production Multi-Camera Controller</p>
+        <div className="header-content">
+          <div className="header-title-section">
+            <h1 className="app-title">
+              <span className="title-icon">🎬</span>
+              a Film in a Box
+            </h1>
+            <p className="app-subtitle">Film Production Multi-Camera Controller</p>
+          </div>
+          
+          <nav className="app-navigation">
+            <button 
+              className={`nav-btn ${currentView === 'control' ? 'active' : ''}`}
+              onClick={() => setCurrentView('control')}
+            >
+              <span className="nav-icon">📹</span>
+              Camera Control
+            </button>
+            <button 
+              className={`nav-btn ${currentView === 'gallery' ? 'active' : ''}`}
+              onClick={() => setCurrentView('gallery')}
+            >
+              <span className="nav-icon">🎬</span>
+              Video Gallery
+            </button>
+          </nav>
+        </div>
       </header>
       
-      <ProductionSetup
-        session={session}
-        qrCodes={qrCodes}
-        cameras={cameras}
-        onUpdateSession={updateSession}
-      />
-      
-      <CameraGrid
-        cameras={cameras}
-        onToggleRecording={toggleRecording}
-      />
+      {currentView === 'control' ? (
+        <>
+          <ProductionSetup
+            session={session}
+            qrCodes={qrCodes}
+            cameras={cameras}
+            onUpdateSession={updateSession}
+          />
+          
+          <CameraGrid
+            cameras={cameras}
+            onToggleRecording={toggleRecording}
+          />
+        </>
+      ) : (
+        <VideoGallery session={session} />
+      )}
     </div>
   );
 }
