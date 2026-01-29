@@ -258,6 +258,15 @@ wss.on('connection', (ws) => {
             await setCameraState(cameraId, true, message.metadata || {});
             
             console.log(`📷 Camera ${cameraId} connected`);
+            
+            // CRITICAL: Send confirmation back to camera
+            ws.send(JSON.stringify({
+              type: 'registered',
+              cameraId: cameraId,
+              status: 'connected'
+            }));
+            console.log(`✅ Sent registration confirmation to Camera ${cameraId}`);
+            
             console.log(`👥 Broadcasting to ${webClients.size} web clients`);
             
             // Broadcast to all web clients
