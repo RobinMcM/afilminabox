@@ -245,6 +245,7 @@ wss.on('connection', (ws) => {
     try {
       const message = JSON.parse(data.toString());
       console.log('📨 Received message:', message.type, message.cameraId ? `(Camera ${message.cameraId})` : '');
+      console.log('📋 Full message data:', JSON.stringify(message));
       
       switch (message.type) {
         case 'register-camera':
@@ -257,13 +258,16 @@ wss.on('connection', (ws) => {
             await setCameraState(cameraId, true, message.metadata || {});
             
             console.log(`📷 Camera ${cameraId} connected`);
+            console.log(`👥 Broadcasting to ${webClients.size} web clients`);
             
             // Broadcast to all web clients
-            broadcastToWebClients({
+            const broadcastMessage = {
               type: 'camera-connected',
               cameraId: cameraId,
               metadata: message.metadata || {}
-            });
+            };
+            console.log('📡 Broadcasting message:', JSON.stringify(broadcastMessage));
+            broadcastToWebClients(broadcastMessage);
           }
           break;
           
@@ -272,6 +276,7 @@ wss.on('connection', (ws) => {
           clientType = 'web-client';
           webClients.add(ws);
           console.log('🌐 Web client registered');
+          console.log(`👥 Total web clients: ${webClients.size}`);
           
           // Send current camera states
           const cameraStates = {};
@@ -282,6 +287,7 @@ wss.on('connection', (ws) => {
             }
           }
           
+          console.log('📤 Sending initial state to client:', JSON.stringify(cameraStates));
           ws.send(JSON.stringify({
             type: 'initial-state',
             cameras: cameraStates
@@ -322,6 +328,7 @@ wss.on('connection', (ws) => {
           
         default:
           console.log('⚠️ Unknown message type:', message.type);
+          console.log('⚠️ Full unknown message:', JSON.stringify(message));
       }
     } catch (error) {
       console.error('❌ Error processing message:', error);
@@ -356,11 +363,14 @@ wss.on('connection', (ws) => {
 // Broadcast message to all web clients
 function broadcastToWebClients(message) {
   const messageStr = JSON.stringify(message);
+  let sentCount = 0;
   webClients.forEach((client) => {
     if (client.readyState === 1) {
       client.send(messageStr);
+      sentCount++;
     }
   });
+  console.log(`📤 Broadcast sent to ${sentCount} clients`);
 }
 
 // Initialize and start server
