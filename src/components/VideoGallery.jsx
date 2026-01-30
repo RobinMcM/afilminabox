@@ -1,10 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 function VideoGallery({ session, onAddToTimeline }) {
   const [recordings, setRecordings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all'); // 'all', 'raw', 'processing', 'processed'
   const [selectedRecording, setSelectedRecording] = useState(null);
+  const [videoPreview, setVideoPreview] = useState(null); // For modal playback
+  const [videoPreviews, setVideoPreviews] = useState({}); // Map of recordingId -> blob URL
+  const fileInputRef = useRef(null);
+  const pendingRecordingIdRef = useRef(null);
 
   useEffect(() => {
     fetchRecordings();
@@ -93,6 +97,37 @@ function VideoGallery({ session, onAddToTimeline }) {
     const badge = badges[status] || badges.local;
     return <span className={`recording-status ${badge.class}`}>{badge.label}</span>;
   };
+  
+  const loadVideoPreview = (recording) => {
+    pendingRecordingIdRef.current = recording.id;
+    fileInputRef.current?.click();
+  };
+  
+  const handleVideoFileSelected = (e) => {
+    const file = e.target.files?.[0];
+    const recordingId = pendingRecordingIdRef.current;
+    
+    if (file && recordingId) {
+      const url = URL.createObjectURL(file);
+      setVideoPreviews(prev => ({
+        ...prev,
+        [recordingId]: url
+      }));
+      console.log(`✅ Video preview loaded for recording ${recordingId}`);
+      
+      // Reset
+      e.target.value = '';
+      pendingRecordingIdRef.current = null;
+    }
+  };
+  
+  const playVideoInModal = (recording) => {
+    setVideoPreview(recording);
+  };
+  
+  const closeVideoModal = () => {
+    setVideoPreview(null);
+  };
 
   if (loading) {
     return (
@@ -105,6 +140,14 @@ function VideoGallery({ session, onAddToTimeline }) {
 
   return (
     <section className="video-gallery">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="video/webm,video/mp4"
+        style={{ display: 'none' }}
+        onChange={handleVideoFileSelected}
+      />
+      
       <div className="gallery-header">
         <div className="gallery-title-section">
           <h2 className="section-title">📹 Video Gallery</h2>
@@ -152,10 +195,35 @@ function VideoGallery({ session, onAddToTimeline }) {
           {filteredRecordings.map(recording => (
             <div key={recording.id} className="recording-card">
               <div className="recording-thumbnail">
-                <div className="thumbnail-placeholder">
-                  <span className="placeholder-icon">🎥</span>
-                  <div className="local-badge">LOCAL</div>
-                </div>
+                {videoPreviews[recording.id] ? (
+                  <div className="thumbnail-video-container">
+                    <video
+                      src={videoPreviews[recording.id]}
+                      className="thumbnail-video"
+                      preload="metadata"
+                    />
+                    <div 
+                      className="thumbnail-play-overlay"
+                      onClick={() => playVideoInModal(recording)}
+                    >
+                      <div className="play-button">
+                        <span className="play-icon">▶</span>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="thumbnail-placeholder">
+                    <span className="placeholder-icon">🎥</span>
+                    <div className="local-badge">LOCAL</div>
+                    <button
+                      className="load-preview-btn"
+                      onClick={() => loadVideoPreview(recording)}
+                      title="Load video preview"
+                    >
+                      Load Preview
+                    </button>
+                  </div>
+                )}
                 <div className="thumbnail-overlay">
                   <span className="camera-badge">Camera {recording.cameraId}</span>
                   {getStatusBadge(recording.status)}
@@ -214,6 +282,32 @@ function VideoGallery({ session, onAddToTimeline }) {
               </div>
             </div>
           ))}
+        </div>
+      )}
+      
+      {/* Video Preview Modal */}
+      {videoPreview && videoPreviews[videoPreview.id] && (
+        <div className="video-modal" onClick={closeVideoModal}>
+          <div className="video-modal-content" onClick={(e) => e.stopPropagation()}>
+            <button className="video-modal-close" onClick={closeVideoModal}>
+              ×
+            </button>
+            <div className="video-modal-header">
+              <h3>Camera {videoPreview.cameraId} Recording</h3>
+              <p className="video-modal-date">{formatDate(videoPreview.timestamp)}</p>
+            </div>
+            <video
+              src={videoPreviews[videoPreview.id]}
+              controls
+              autoPlay
+              className="video-modal-player"
+            />
+            <div className="video-modal-info">
+              <span>Duration: {formatDuration(videoPreview.duration || 0)}</span>
+              <span>Size: {formatFileSize(videoPreview.fileSize || 0)}</span>
+              <span>File: {videoPreview.fileName}</span>
+            </div>
+          </div>
         </div>
       )}
     </section>

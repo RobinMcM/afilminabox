@@ -1733,3 +1733,220 @@ body::before {
   }
 }
 
+
+/* ===================================
+   Video Preview & Play Button Styles
+   =================================== */
+
+.thumbnail-video-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: #000;
+}
+
+.thumbnail-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.thumbnail-play-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.thumbnail-play-overlay:hover {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.play-button {
+  width: 60px;
+  height: 60px;
+  background: rgba(0, 255, 242, 0.9);
+  border: 3px solid var(--accent-cyan);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+  box-shadow: 0 0 20px rgba(0, 255, 242, 0.5);
+}
+
+.thumbnail-play-overlay:hover .play-button {
+  transform: scale(1.1);
+  background: var(--accent-cyan);
+  box-shadow: 0 0 30px rgba(0, 255, 242, 0.8);
+}
+
+.play-icon {
+  font-size: 24px;
+  color: var(--bg-primary);
+  margin-left: 4px; /* Visual centering */
+}
+
+.load-preview-btn {
+  position: absolute;
+  bottom: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.5rem 1rem;
+  background: rgba(0, 255, 242, 0.2);
+  border: 1px solid var(--accent-cyan);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-family: 'Orbitron', sans-serif;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.load-preview-btn:hover {
+  background: rgba(0, 255, 242, 0.3);
+  box-shadow: 0 0 15px rgba(0, 255, 242, 0.3);
+  transform: translateX(-50%) translateY(-2px);
+}
+
+/* Video Modal */
+.video-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.video-modal-content {
+  position: relative;
+  width: 90%;
+  max-width: 1200px;
+  background: var(--bg-secondary);
+  border: 2px solid var(--accent-cyan);
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 0 50px rgba(0, 255, 242, 0.3);
+  animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(50px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.video-modal-close {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  width: 40px;
+  height: 40px;
+  background: rgba(255, 0, 0, 0.8);
+  border: 2px solid red;
+  border-radius: 50%;
+  color: white;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  z-index: 10;
+}
+
+.video-modal-close:hover {
+  background: red;
+  transform: rotate(90deg) scale(1.1);
+  box-shadow: 0 0 20px rgba(255, 0, 0, 0.5);
+}
+
+.video-modal-header {
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.video-modal-header h3 {
+  margin: 0;
+  font-family: 'Orbitron', sans-serif;
+  color: var(--accent-cyan);
+  font-size: 1.5rem;
+}
+
+.video-modal-date {
+  margin: 0.5rem 0 0 0;
+  color: var(--text-secondary);
+  font-family: 'Courier Prime', monospace;
+  font-size: 0.9rem;
+}
+
+.video-modal-player {
+  width: 100%;
+  max-height: 70vh;
+  background: #000;
+  border-radius: 8px;
+}
+
+.video-modal-info {
+  display: flex;
+  gap: 2rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--glass-border);
+  font-family: 'Courier Prime', monospace;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+/* Responsive Modal */
+@media (max-width: 768px) {
+  .video-modal-content {
+    width: 95%;
+    padding: 1rem;
+  }
+  
+  .video-modal-header h3 {
+    font-size: 1.2rem;
+  }
+  
+  .video-modal-info {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  
+  .play-button {
+    width: 50px;
+    height: 50px;
+  }
+  
+  .play-icon {
+    font-size: 20px;
+  }
+}
+
