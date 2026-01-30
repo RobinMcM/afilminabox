@@ -180,15 +180,24 @@ const VideoTimeline = forwardRef(({ videos, setVideos }, ref) => {
   
   // Calculate which videos are in the selected range
   const getVideoRangeFromMarkers = () => {
-    if (videos.length === 0 || totalDuration === 0) {
+    if (videos.length === 0) {
       return { startIndex: 0, endIndex: 0 };
+    }
+    
+    // When durations are missing/zero, treat each video as equal width (equal segments)
+    if (totalDuration === 0) {
+      const n = videos.length;
+      const startIndex = Math.min(n - 1, Math.floor((startMarkerPosition / 100) * n));
+      // Last video whose segment overlaps the stop position
+      const endIndex = Math.min(n - 1, Math.max(0, Math.ceil((stopMarkerPosition / 100) * n) - 1));
+      return { startIndex, endIndex: Math.max(endIndex, startIndex) };
     }
     
     let cumulativeTime = 0;
     let startIndex = 0;
     let endIndex = videos.length - 1;
     
-    // Find which videos fall within the marker range
+    // Find which videos fall within the marker range by duration
     for (let i = 0; i < videos.length; i++) {
       const videoStart = (cumulativeTime / totalDuration) * 100;
       const videoEnd = ((cumulativeTime + (videos[i].duration || 0)) / totalDuration) * 100;
@@ -204,7 +213,7 @@ const VideoTimeline = forwardRef(({ videos, setVideos }, ref) => {
       cumulativeTime += videos[i].duration || 0;
     }
     
-    return { startIndex, endIndex };
+    return { startIndex, endIndex: Math.max(endIndex, startIndex) };
   };
   
   // Marker drag handlers
