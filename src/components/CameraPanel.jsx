@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-function CameraPanel({ cameraId, camera, onToggleRecording }) {
+function CameraPanel({ cameraId, camera, onToggleRecording, onZoomChange }) {
   const videoRef = useRef(null);
+  const [zoom, setZoom] = useState(1.0);
   
   useEffect(() => {
     if (videoRef.current && camera.stream) {
@@ -13,6 +14,14 @@ function CameraPanel({ cameraId, camera, onToggleRecording }) {
     if (!camera.connected) return 'offline';
     if (camera.recording) return 'recording';
     return 'connected';
+  };
+  
+  const handleZoomChange = (e) => {
+    const newZoom = parseFloat(e.target.value);
+    setZoom(newZoom);
+    if (onZoomChange) {
+      onZoomChange(cameraId, newZoom);
+    }
   };
   
   return (
@@ -63,6 +72,23 @@ function CameraPanel({ cameraId, camera, onToggleRecording }) {
             </div>
           </>
         )}
+      </div>
+      
+      <div className="zoom-control">
+        <label className="zoom-label">
+          <span className="zoom-icon">🔍</span>
+          Zoom: {zoom.toFixed(1)}x
+        </label>
+        <input 
+          type="range" 
+          className="zoom-slider"
+          min="1.0" 
+          max="5.0" 
+          step="0.1" 
+          value={zoom}
+          onChange={handleZoomChange}
+          disabled={!camera.connected}
+        />
       </div>
       
       <div className="camera-controls">

@@ -556,6 +556,19 @@ function App() {
     console.log(`💾 Metadata saved to localStorage`);
   };
   
+  const handleZoomChange = (cameraId, zoom) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'set-zoom',
+        cameraId: cameraId,
+        zoom: zoom
+      }));
+      console.log(`🔍 Sent zoom ${zoom}x command to Camera ${cameraId}`);
+    } else {
+      console.warn(`⚠️ WebSocket not connected, cannot send zoom command`);
+    }
+  };
+  
   return (
     <div className="app">
       <header className="app-header">
@@ -596,10 +609,11 @@ function App() {
             onUpdateSession={updateSession}
           />
           
-          <CameraGrid
-            cameras={cameras}
-            onToggleRecording={toggleRecording}
-          />
+        <CameraGrid 
+          cameras={cameras} 
+          onToggleRecording={toggleRecording}
+          onZoomChange={handleZoomChange}
+        />
         </>
       ) : (
         <VideoGallery session={session} />

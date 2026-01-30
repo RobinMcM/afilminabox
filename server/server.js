@@ -523,6 +523,22 @@ wss.on('connection', (ws) => {
           }
           break;
           
+        case 'set-zoom':
+          // Route zoom command to specific camera
+          if (message.cameraId) {
+            const targetCamera = cameraClients.get(message.cameraId);
+            if (targetCamera && targetCamera.readyState === 1) {
+              targetCamera.send(JSON.stringify({
+                type: 'set-zoom',
+                zoom: message.zoom
+              }));
+              console.log(`🔍 Sent zoom ${message.zoom}x to Camera ${message.cameraId}`);
+            } else {
+              console.warn(`⚠️ Camera ${message.cameraId} not connected for zoom command`);
+            }
+          }
+          break;
+        
         case 'start-recording':
         case 'stop-recording':
           // Recording control - forward to camera

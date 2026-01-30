@@ -1,6 +1,6 @@
 import CameraPanel from './CameraPanel';
 
-function CameraGrid({ cameras, onToggleRecording }) {
+function CameraGrid({ cameras, onToggleRecording, onZoomChange }) {
   return (
     <section className="camera-section">
       <h2 className="section-title">Live Camera Feeds</h2>
@@ -12,6 +12,7 @@ function CameraGrid({ cameras, onToggleRecording }) {
             cameraId={cameraId}
             camera={cameras[cameraId]}
             onToggleRecording={onToggleRecording}
+            onZoomChange={onZoomChange}
           />
         ))}
       </div>
