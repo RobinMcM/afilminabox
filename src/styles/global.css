@@ -1990,3 +1990,144 @@ body::before {
   transform: none;
 }
 
+
+/* ===================================
+   Timeline Range Selection Styles
+   =================================== */
+
+/* Timeline Markers */
+.timeline-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  cursor: ew-resize;
+  z-index: 20;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.timeline-marker-start {
+  background: var(--accent-cyan);
+  box-shadow: 0 0 15px var(--accent-cyan);
+}
+
+.timeline-marker-stop {
+  background: var(--accent-magenta);
+  box-shadow: 0 0 15px var(--accent-magenta);
+}
+
+.timeline-marker:hover {
+  width: 5px;
+  box-shadow: 0 0 25px currentColor;
+}
+
+.marker-handle {
+  position: absolute;
+  top: -30px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-secondary);
+  border: 2px solid currentColor;
+  border-radius: 6px;
+  padding: 0.3rem 0.6rem;
+  white-space: nowrap;
+  cursor: grab;
+  user-select: none;
+}
+
+.marker-handle:active {
+  cursor: grabbing;
+}
+
+.marker-label {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: currentColor;
+}
+
+.timeline-marker-start .marker-label {
+  color: var(--accent-cyan);
+}
+
+.timeline-marker-stop .marker-label {
+  color: var(--accent-magenta);
+}
+
+/* Selection Range Highlight */
+.timeline-selection-range {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(0, 255, 242, 0.15);
+  border-left: 2px solid var(--accent-cyan);
+  border-right: 2px solid var(--accent-magenta);
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* Range Info Display */
+.timeline-range-info {
+  font-family: 'Courier Prime', monospace;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  padding: 0.5rem 1rem;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+}
+
+/* Play Range Button */
+.timeline-btn-play-range {
+  background: rgba(0, 255, 242, 0.15);
+  border-color: var(--accent-cyan);
+  border-width: 2px;
+  font-size: 1rem;
+  padding: 0.8rem 1.5rem;
+}
+
+.timeline-btn-play-range:hover {
+  background: rgba(0, 255, 242, 0.3);
+  box-shadow: 0 0 30px rgba(0, 255, 242, 0.5);
+}
+
+.timeline-btn-play-range:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.timeline-btn-play-range:disabled:hover {
+  background: rgba(0, 255, 242, 0.15);
+  box-shadow: none;
+  transform: none;
+}
+
+/* Enhanced segment visual feedback */
+.timeline-segment {
+  background: linear-gradient(
+    135deg,
+    rgba(0, 255, 242, 0.1),
+    rgba(0, 255, 242, 0.05)
+  );
+}
+
+.timeline-segment:hover {
+  background: linear-gradient(
+    135deg,
+    rgba(0, 255, 242, 0.2),
+    rgba(0, 255, 242, 0.1)
+  );
+}
+
+/* Video Modal Progress Info */
+.video-modal-progress {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--glass-border);
+  font-family: 'Courier Prime', monospace;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  text-align: center;
+}
+

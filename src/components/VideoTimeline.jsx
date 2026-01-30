@@ -5,7 +5,21 @@ const VideoTimeline = forwardRef(({ videos, setVideos }, ref) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [playheadPosition, setPlayheadPosition] = useState(0);
+  
+  // Range selection markers
+  const [startMarkerPosition, setStartMarkerPosition] = useState(0);
+  const [stopMarkerPosition, setStopMarkerPosition] = useState(100);
+  const [isDraggingStart, setIsDraggingStart] = useState(false);
+  const [isDraggingStop, setIsDraggingStop] = useState(false);
+  
+  // Modal playback
+  const [showModal, setShowModal] = useState(false);
+  const [modalVideoIndex, setModalVideoIndex] = useState(0);
+  const [modalIsPlaying, setModalIsPlaying] = useState(false);
+  
   const videoRef = useRef(null);
+  const modalVideoRef = useRef(null);
+  const timelineBarRef = useRef(null);
   const fileInputRef = useRef(null);
   const pendingRecordingRef = useRef(null);
 
@@ -163,6 +177,123 @@ const VideoTimeline = forwardRef(({ videos, setVideos }, ref) => {
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
+  
+  // Calculate which videos are in the selected range
+  const getVideoRangeFromMarkers = () => {
+    if (videos.length === 0 || totalDuration === 0) {
+      return { startIndex: 0, endIndex: 0 };
+    }
+    
+    let cumulativeTime = 0;
+    let startIndex = 0;
+    let endIndex = videos.length - 1;
+    
+    // Find which videos fall within the marker range
+    for (let i = 0; i < videos.length; i++) {
+      const videoStart = (cumulativeTime / totalDuration) * 100;
+      const videoEnd = ((cumulativeTime + (videos[i].duration || 0)) / totalDuration) * 100;
+      
+      if (startMarkerPosition >= videoStart && startMarkerPosition < videoEnd) {
+        startIndex = i;
+      }
+      if (stopMarkerPosition > videoStart && stopMarkerPosition <= videoEnd) {
+        endIndex = i;
+        break;
+      }
+      
+      cumulativeTime += videos[i].duration || 0;
+    }
+    
+    return { startIndex, endIndex };
+  };
+  
+  // Marker drag handlers
+  const handleMarkerMouseDown = (markerType) => (e) => {
+    e.preventDefault();
+    if (markerType === 'start') {
+      setIsDraggingStart(true);
+    } else {
+      setIsDraggingStop(true);
+    }
+  };
+  
+  const handleMouseMove = (e) => {
+    if (!timelineBarRef.current) return;
+    
+    const rect = timelineBarRef.current.getBoundingClientRect();
+    const position = ((e.clientX - rect.left) / rect.width) * 100;
+    const clampedPosition = Math.max(0, Math.min(100, position));
+    
+    if (isDraggingStart) {
+      // Don't allow start to go past stop
+      setStartMarkerPosition(Math.min(clampedPosition, stopMarkerPosition - 1));
+    } else if (isDraggingStop) {
+      // Don't allow stop to go before start
+      setStopMarkerPosition(Math.max(clampedPosition, startMarkerPosition + 1));
+    }
+  };
+  
+  const handleMouseUp = () => {
+    setIsDraggingStart(false);
+    setIsDraggingStop(false);
+  };
+  
+  // Attach drag handlers to window
+  useEffect(() => {
+    if (isDraggingStart || isDraggingStop) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+      return () => {
+        window.removeEventListener('mousemove', handleMouseMove);
+        window.removeEventListener('mouseup', handleMouseUp);
+      };
+    }
+  }, [isDraggingStart, isDraggingStop, startMarkerPosition, stopMarkerPosition]);
+  
+  // Modal playback handlers
+  const playSelectedRange = () => {
+    const { startIndex } = getVideoRangeFromMarkers();
+    setModalVideoIndex(startIndex);
+    setShowModal(true);
+    setModalIsPlaying(true);
+  };
+  
+  const handleModalVideoEnded = () => {
+    const { startIndex, endIndex } = getVideoRangeFromMarkers();
+    
+    if (modalVideoIndex < endIndex) {
+      // Play next video in range
+      setModalVideoIndex(prev => prev + 1);
+    } else {
+      // Range complete
+      setModalIsPlaying(false);
+      console.log('🎬 Selected range playback complete');
+    }
+  };
+  
+  const closeModal = () => {
+    setShowModal(false);
+    setModalIsPlaying(false);
+    if (modalVideoRef.current) {
+      modalVideoRef.current.pause();
+      modalVideoRef.current.currentTime = 0;
+    }
+  };
+  
+  // Update modal video source when index changes
+  useEffect(() => {
+    if (showModal && modalVideoIndex < videos.length && modalVideoRef.current) {
+      const video = videos[modalVideoIndex];
+      if (video && video.videoUrl) {
+        modalVideoRef.current.src = video.videoUrl;
+        if (modalIsPlaying) {
+          modalVideoRef.current.play().catch(err => {
+            console.error('❌ Error playing modal video:', err);
+          });
+        }
+      }
+    }
+  }, [modalVideoIndex, showModal, videos, modalIsPlaying]);
 
   if (videos.length === 0) {
     return (
@@ -214,7 +345,10 @@ const VideoTimeline = forwardRef(({ videos, setVideos }, ref) => {
 
       {/* Timeline Bar */}
       <div className="timeline-bar-container">
-        <div className="timeline-bar">
+        <div 
+          ref={timelineBarRef}
+          className="timeline-bar"
+        >
           {videos.map((video, index) => {
             const segmentWidth = ((video.duration || 0) / totalDuration) * 100;
             const isActive = index === currentVideoIndex;
@@ -248,11 +382,36 @@ const VideoTimeline = forwardRef(({ videos, setVideos }, ref) => {
             );
           })}
           
-          {/* Playhead */}
-          <div
-            className="timeline-playhead"
-            style={{ left: `${playheadPosition}%` }}
+          {/* Selection Range Highlight */}
+          <div 
+            className="timeline-selection-range"
+            style={{
+              left: `${startMarkerPosition}%`,
+              width: `${stopMarkerPosition - startMarkerPosition}%`
+            }}
           />
+          
+          {/* Start Marker */}
+          <div 
+            className="timeline-marker timeline-marker-start"
+            style={{ left: `${startMarkerPosition}%` }}
+            onMouseDown={handleMarkerMouseDown('start')}
+          >
+            <div className="marker-handle">
+              <span className="marker-label">START</span>
+            </div>
+          </div>
+          
+          {/* Stop Marker */}
+          <div 
+            className="timeline-marker timeline-marker-stop"
+            style={{ left: `${stopMarkerPosition}%` }}
+            onMouseDown={handleMarkerMouseDown('stop')}
+          >
+            <div className="marker-handle">
+              <span className="marker-label">STOP</span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -260,16 +419,21 @@ const VideoTimeline = forwardRef(({ videos, setVideos }, ref) => {
       <div className="timeline-controls">
         <div className="timeline-controls-left">
           <button
-            className={`timeline-btn timeline-btn-play ${isPlaying ? 'playing' : ''}`}
-            onClick={togglePlayback}
-            title={isPlaying ? 'Pause' : 'Play'}
+            className="timeline-btn timeline-btn-play-range"
+            onClick={playSelectedRange}
+            disabled={videos.length === 0}
+            title="Play selected range"
           >
-            <span className="btn-icon">{isPlaying ? '⏸' : '▶'}</span>
-            <span className="btn-text">{isPlaying ? 'Pause' : 'Play'}</span>
+            <span className="btn-icon">▶</span>
+            <span className="btn-text">Play Selected Range</span>
           </button>
           
-          <div className="timeline-time-display">
-            {formatTime(currentTime)} / {formatTime(totalDuration)}
+          <div className="timeline-range-info">
+            {(() => {
+              const { startIndex, endIndex } = getVideoRangeFromMarkers();
+              const videoCount = endIndex - startIndex + 1;
+              return `${videoCount} video${videoCount !== 1 ? 's' : ''} selected`;
+            })()}
           </div>
         </div>
         
@@ -293,6 +457,42 @@ const VideoTimeline = forwardRef(({ videos, setVideos }, ref) => {
           </button>
         </div>
       </div>
+      
+      {/* Video Modal */}
+      {showModal && modalVideoIndex < videos.length && videos[modalVideoIndex] && (
+        <div className="video-modal" onClick={closeModal}>
+          <div className="video-modal-content" onClick={(e) => e.stopPropagation()}>
+            <button className="video-modal-close" onClick={closeModal}>
+              ×
+            </button>
+            
+            <div className="video-modal-header">
+              <h3>Timeline Playback</h3>
+              <p className="video-modal-info">
+                Video {modalVideoIndex + 1} of {videos.length} • 
+                Camera {videos[modalVideoIndex].cameraId}
+              </p>
+            </div>
+            
+            <video
+              ref={modalVideoRef}
+              src={videos[modalVideoIndex].videoUrl}
+              controls
+              autoPlay={modalIsPlaying}
+              onEnded={handleModalVideoEnded}
+              className="video-modal-player"
+            />
+            
+            <div className="video-modal-progress">
+              <span>
+                Playing range: Video {getVideoRangeFromMarkers().startIndex + 1} 
+                {' to '}
+                {getVideoRangeFromMarkers().endIndex + 1}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 });
