@@ -11,13 +11,25 @@ const VideoTimeline = forwardRef(({ videos, setVideos }, ref) => {
 
   // Expose methods to parent via ref
   useImperativeHandle(ref, () => ({
-    addToTimeline: (recording) => {
-      pendingRecordingRef.current = recording;
-      fileInputRef.current?.click();
+    addToTimeline: (recording, videoUrl) => {
+      if (videoUrl) {
+        // Direct add with existing video URL (no file picker needed)
+        const videoWithUrl = {
+          ...recording,
+          videoUrl: videoUrl
+        };
+        
+        setVideos(prev => [...prev, videoWithUrl]);
+        console.log(`✅ Added "${recording.fileName}" to timeline (auto)`);
+      } else {
+        // Fallback: prompt for file selection (legacy mode)
+        pendingRecordingRef.current = recording;
+        fileInputRef.current?.click();
+      }
     }
   }));
 
-  // Handle file selection
+  // Handle file selection (fallback mode only)
   const handleFileSelected = (e) => {
     const file = e.target.files?.[0];
     const recording = pendingRecordingRef.current;

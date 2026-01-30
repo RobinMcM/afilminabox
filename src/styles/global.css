@@ -1975,3 +1975,18 @@ body::before {
   transform: translateY(-2px);
 }
 
+
+/* Disabled timeline button */
+.btn-timeline:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: rgba(100, 100, 100, 0.1);
+  border-color: rgba(100, 100, 100, 0.3);
+}
+
+.btn-timeline:disabled:hover {
+  background: rgba(100, 100, 100, 0.1);
+  box-shadow: none;
+  transform: none;
+}
+

@@ -315,8 +315,9 @@ function VideoGallery({ session, onAddToTimeline }) {
               <div className="recording-actions">
                 <button 
                   className="action-btn btn-timeline"
-                  onClick={() => onAddToTimeline?.(recording)}
+                  onClick={() => onAddToTimeline?.(recording, videoPreviews[recording.id])}
                   title="Add to timeline"
+                  disabled={!videoPreviews[recording.id]}
                 >
                   <span className="btn-icon">⬆️</span>
                   Add to Timeline

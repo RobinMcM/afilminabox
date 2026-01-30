@@ -602,10 +602,10 @@ function App() {
     }
   };
   
-  const handleAddToTimeline = (recording) => {
-    // Trigger timeline's file selection via ref
+  const handleAddToTimeline = (recording, videoUrl) => {
+    // Add to timeline directly with video URL (no file picker)
     if (timelineRef.current) {
-      timelineRef.current.addToTimeline(recording);
+      timelineRef.current.addToTimeline(recording, videoUrl);
     }
   };
   
