@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import * as StorageManager from '../utils/storageManager';
 
 function VideoGallery({ session, onAddToTimeline }) {
   const [recordings, setRecordings] = useState([]);
@@ -7,6 +8,7 @@ function VideoGallery({ session, onAddToTimeline }) {
   const [selectedRecording, setSelectedRecording] = useState(null);
   const [videoPreview, setVideoPreview] = useState(null); // For modal playback
   const [videoPreviews, setVideoPreviews] = useState({}); // Map of recordingId -> blob URL
+  const [hasStorageAccess, setHasStorageAccess] = useState(false);
   const fileInputRef = useRef(null);
   const pendingRecordingIdRef = useRef(null);
 
@@ -24,31 +26,58 @@ function VideoGallery({ session, onAddToTimeline }) {
     return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
-  const fetchRecordings = () => {
+  const fetchRecordings = async () => {
     try {
-      // Read from localStorage instead of API
-      const localRecordings = JSON.parse(localStorage.getItem('recordings') || '[]');
-      setRecordings(localRecordings);
-      console.log(`📹 Loaded ${localRecordings.length} recordings from localStorage`);
+      // Check if we have structured storage access
+      const hasAccess = await StorageManager.hasDirectoryAccess();
+      setHasStorageAccess(hasAccess);
+      
+      if (hasAccess) {
+        // Load from structured folder with automatic video previews
+        console.log('📁 Loading from "a Film in a Box" folder...');
+        const { metadata, videoPreviews: loadedPreviews } = await StorageManager.loadAllVideos();
+        setRecordings(metadata.recordings);
+        setVideoPreviews(loadedPreviews);
+        console.log(`📹 Loaded ${metadata.recordings.length} recordings with ${Object.keys(loadedPreviews).length} video previews`);
+      } else {
+        // Fallback: load from localStorage (legacy)
+        console.log('ℹ️ Loading from localStorage (fallback)');
+        const localRecordings = JSON.parse(localStorage.getItem('recordings') || '[]');
+        setRecordings(localRecordings);
+        console.log(`📹 Loaded ${localRecordings.length} recordings from localStorage`);
+      }
     } catch (error) {
-      console.error('❌ Error loading recordings from localStorage:', error);
+      console.error('❌ Error loading recordings:', error);
       setRecordings([]);
     } finally {
       setLoading(false);
     }
   };
 
-  const deleteRecording = (id) => {
-    if (!confirm('Remove this recording from the list?\n\nNote: This only removes the entry from the gallery. The video file remains in your Downloads folder.')) return;
+  const deleteRecording = async (id) => {
+    const message = hasStorageAccess
+      ? 'Remove this recording from the list?\n\nNote: This removes the entry but the video file remains in the folder.'
+      : 'Remove this recording from the list?\n\nNote: This only removes the entry from the gallery. The video file remains in your Downloads folder.';
+    
+    if (!confirm(message)) return;
     
     try {
-      // Remove from localStorage
-      const updatedRecordings = recordings.filter(r => r.id !== id);
-      localStorage.setItem('recordings', JSON.stringify(updatedRecordings));
-      setRecordings(updatedRecordings);
-      console.log('✅ Recording removed from gallery');
+      if (hasStorageAccess) {
+        // Remove from structured storage
+        await StorageManager.removeRecording(id);
+        const metadata = await StorageManager.readMetadata();
+        setRecordings(metadata.recordings);
+        console.log('✅ Recording removed from metadata');
+      } else {
+        // Remove from localStorage
+        const updatedRecordings = recordings.filter(r => r.id !== id);
+        localStorage.setItem('recordings', JSON.stringify(updatedRecordings));
+        setRecordings(updatedRecordings);
+        console.log('✅ Recording removed from gallery');
+      }
     } catch (error) {
       console.error('❌ Error deleting recording:', error);
+      alert('Error deleting recording. Please try again.');
     }
   };
 
@@ -98,7 +127,14 @@ function VideoGallery({ session, onAddToTimeline }) {
     return <span className={`recording-status ${badge.class}`}>{badge.label}</span>;
   };
   
-  const loadVideoPreview = (recording) => {
+  const loadVideoPreview = async (recording) => {
+    // Only needed for fallback mode (no structured storage)
+    if (hasStorageAccess) {
+      console.log('ℹ️ Video should already be loaded from folder');
+      return;
+    }
+    
+    // Fallback: manual file selection
     pendingRecordingIdRef.current = recording.id;
     fileInputRef.current?.click();
   };
@@ -118,6 +154,17 @@ function VideoGallery({ session, onAddToTimeline }) {
       // Reset
       e.target.value = '';
       pendingRecordingIdRef.current = null;
+    }
+  };
+  
+  const setupStorage = async () => {
+    try {
+      await StorageManager.requestDirectoryAccess();
+      await StorageManager.getOrCreateFolder();
+      alert('✅ Setup complete! Reloading gallery...');
+      fetchRecordings();
+    } catch (error) {
+      console.error('❌ Setup failed:', error);
     }
   };
   
@@ -153,6 +200,15 @@ function VideoGallery({ session, onAddToTimeline }) {
           <h2 className="section-title">📹 Video Gallery</h2>
           <p className="gallery-subtitle">
             {recordings.length} recording{recordings.length !== 1 ? 's' : ''} total
+            {!hasStorageAccess && (
+              <button 
+                className="setup-storage-btn"
+                onClick={setupStorage}
+                title="Set up structured storage"
+              >
+                📁 Setup Folder
+              </button>
+            )}
           </p>
         </div>
         

@@ -1950,3 +1950,28 @@ body::before {
   }
 }
 
+
+/* ===================================
+   Storage Setup Button
+   =================================== */
+
+.setup-storage-btn {
+  margin-left: 1rem;
+  padding: 0.4rem 0.8rem;
+  background: rgba(255, 237, 0, 0.1);
+  border: 1px solid var(--accent-yellow);
+  border-radius: 6px;
+  color: var(--accent-yellow);
+  font-family: 'Orbitron', sans-serif;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.setup-storage-btn:hover {
+  background: rgba(255, 237, 0, 0.2);
+  box-shadow: 0 0 15px rgba(255, 237, 0, 0.3);
+  transform: translateY(-2px);
+}
+

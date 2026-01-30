@@ -3,6 +3,7 @@ import ProductionSetup from './components/ProductionSetup';
 import CameraGrid from './components/CameraGrid';
 import VideoGallery from './components/VideoGallery';
 import VideoTimeline from './components/VideoTimeline';
+import * as StorageManager from './utils/storageManager';
 
 function App() {
   const [currentView, setCurrentView] = useState('control'); // 'control' or 'gallery'
@@ -35,6 +36,11 @@ function App() {
   useEffect(() => {
     fetchSession();
     fetchQRCodes();
+    
+    // Check and prompt for folder setup
+    StorageManager.checkAndPromptSetup().catch(err => {
+      console.warn('Storage setup check failed:', err);
+    });
   }, []);
   
   // WebSocket connection with reconnection logic
@@ -507,7 +513,7 @@ function App() {
     }
   };
   
-  const saveRecordingToPC = (cameraId, chunks) => {
+  const saveRecordingToPC = async (cameraId, chunks) => {
     if (chunks.length === 0) {
       console.warn(`⚠️ No data recorded for Camera ${cameraId}`);
       return;
@@ -518,29 +524,14 @@ function App() {
     const timestamp = Date.now();
     const fileName = `camera-${cameraId}-${timestamp}.webm`;
     
-    // Auto-download to PC
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.style.display = 'none';
-    a.href = url;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    
-    // Cleanup
-    setTimeout(() => {
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    }, 100);
-    
     // Calculate duration (rough estimate based on recording time)
     const duration = camera.recordingStartTime 
       ? Math.floor((Date.now() - camera.recordingStartTime) / 1000)
       : 0;
     
-    // Save metadata to localStorage
+    // Prepare recording metadata
     const recording = {
-      id: `${Date.now()}-${cameraId}`,
+      id: `${timestamp}-${cameraId}`,
       cameraId: cameraId,
       fileName: fileName,
       timestamp: new Date().toISOString(),
@@ -548,16 +539,54 @@ function App() {
       fileSize: blob.size,
       filmGuid: session.filmGuid,
       productionCompanyGuid: session.productionCompanyGuid,
-      status: 'local'
+      status: 'local',
+      // Future fields ready for expansion
+      userGuid: null,
+      sceneNumber: null,
+      takeNumber: null
     };
     
-    // Get existing recordings from localStorage
-    const existingRecordings = JSON.parse(localStorage.getItem('recordings') || '[]');
-    existingRecordings.unshift(recording); // Add to beginning (newest first)
-    localStorage.setItem('recordings', JSON.stringify(existingRecordings));
-    
-    console.log(`✅ Recording saved: ${fileName}`);
-    console.log(`💾 Metadata saved to localStorage`);
+    try {
+      // Try to save to structured folder
+      const hasAccess = await StorageManager.hasDirectoryAccess();
+      
+      if (hasAccess) {
+        // Save video file to "a Film in a Box" folder
+        await StorageManager.saveVideoToFolder(blob, fileName);
+        
+        // Add to metadata JSON
+        await StorageManager.addRecording(recording);
+        
+        console.log(`✅ Recording saved to "a Film in a Box" folder: ${fileName}`);
+        console.log(`💾 Metadata updated in recordings.json`);
+      } else {
+        // Fallback: traditional auto-download
+        console.log('ℹ️ No folder access, using fallback download');
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        
+        // Cleanup
+        setTimeout(() => {
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }, 100);
+        
+        // Save to localStorage as fallback
+        const existingRecordings = JSON.parse(localStorage.getItem('recordings') || '[]');
+        existingRecordings.unshift(recording);
+        localStorage.setItem('recordings', JSON.stringify(existingRecordings));
+        
+        console.log(`✅ Recording saved (fallback): ${fileName}`);
+      }
+    } catch (error) {
+      console.error('❌ Error saving recording:', error);
+      alert(`Error saving recording: ${error.message}\n\nPlease check folder permissions.`);
+    }
   };
   
   const handleZoomChange = (cameraId, zoom) => {
