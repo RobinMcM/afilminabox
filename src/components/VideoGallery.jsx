@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 
-function VideoGallery({ session }) {
+function VideoGallery({ session, onAddToTimeline }) {
   const [recordings, setRecordings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all'); // 'all', 'raw', 'processing', 'processed'
@@ -189,6 +189,15 @@ function VideoGallery({ session }) {
               </div>
 
               <div className="recording-actions">
+                <button 
+                  className="action-btn btn-timeline"
+                  onClick={() => onAddToTimeline?.(recording)}
+                  title="Add to timeline"
+                >
+                  <span className="btn-icon">⬆️</span>
+                  Add to Timeline
+                </button>
+                
                 <div className="action-info">
                   <span className="info-icon">📁</span>
                   <span className="info-text">File: {recording.fileName}</span>

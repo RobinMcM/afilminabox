@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import ProductionSetup from './components/ProductionSetup';
 import CameraGrid from './components/CameraGrid';
 import VideoGallery from './components/VideoGallery';
+import VideoTimeline from './components/VideoTimeline';
 
 function App() {
   const [currentView, setCurrentView] = useState('control'); // 'control' or 'gallery'
@@ -23,9 +24,12 @@ function App() {
     3: null
   });
   
+  const [timelineVideos, setTimelineVideos] = useState([]);
+  
   const wsRef = useRef(null);
   const reconnectTimeoutRef = useRef(null);
   const reconnectAttempts = useRef(0);
+  const timelineRef = useRef(null);
   
   // Fetch initial session data
   useEffect(() => {
@@ -569,6 +573,13 @@ function App() {
     }
   };
   
+  const handleAddToTimeline = (recording) => {
+    // Trigger timeline's file selection via ref
+    if (timelineRef.current) {
+      timelineRef.current.addToTimeline(recording);
+    }
+  };
+  
   return (
     <div className="app">
       <header className="app-header">
@@ -616,7 +627,17 @@ function App() {
         />
         </>
       ) : (
-        <VideoGallery session={session} />
+        <>
+          <VideoTimeline 
+            ref={timelineRef}
+            videos={timelineVideos}
+            setVideos={setTimelineVideos}
+          />
+          <VideoGallery 
+            session={session}
+            onAddToTimeline={handleAddToTimeline}
+          />
+        </>
       )}
     </div>
   );
