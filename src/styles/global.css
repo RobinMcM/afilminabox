@@ -1995,76 +1995,99 @@ body::before {
    Timeline Range Selection Styles
    =================================== */
 
-/* Timeline Markers */
-.timeline-marker {
+/* Wrapper so overlay and bar share same width for drag % */
+.timeline-range-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+/* Editor-style overlay: track line above timeline */
+.timeline-range-overlay {
+  position: relative;
+  width: 100%;
+  height: 28px;
+  margin-bottom: 8px;
+}
+
+/* Thin track line (full width) */
+.timeline-range-track {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  cursor: ew-resize;
-  z-index: 20;
-  transition: all 0.2s ease;
-  user-select: none;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 6px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--glass-border);
+  border-radius: 4px;
+  pointer-events: none;
 }
 
-.timeline-marker-start {
-  background: var(--accent-cyan);
-  box-shadow: 0 0 15px var(--accent-cyan);
-}
-
-.timeline-marker-stop {
-  background: var(--accent-magenta);
-  box-shadow: 0 0 15px var(--accent-magenta);
-}
-
-.timeline-marker:hover {
-  width: 5px;
-  box-shadow: 0 0 25px currentColor;
-}
-
-.marker-handle {
-  position: absolute;
-  top: -30px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--bg-secondary);
-  border: 2px solid currentColor;
-  border-radius: 6px;
-  padding: 0.3rem 0.6rem;
-  white-space: nowrap;
-  cursor: grab;
-  user-select: none;
-}
-
-.marker-handle:active {
-  cursor: grabbing;
-}
-
-.marker-label {
-  font-family: 'Orbitron', sans-serif;
-  font-size: 0.7rem;
-  font-weight: 700;
-  color: currentColor;
-}
-
-.timeline-marker-start .marker-label {
-  color: var(--accent-cyan);
-}
-
-.timeline-marker-stop .marker-label {
-  color: var(--accent-magenta);
-}
-
-/* Selection Range Highlight */
+/* Selection bar: line covering timeline section (start/stop shades) */
 .timeline-selection-range {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  background: rgba(0, 255, 242, 0.15);
-  border-left: 2px solid var(--accent-cyan);
-  border-right: 2px solid var(--accent-magenta);
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 10px;
+  margin-top: -2px;
+  background: linear-gradient(
+    to right,
+    rgba(0, 200, 220, 0.5) 0%,
+    rgba(0, 255, 242, 0.25) 30%,
+    rgba(255, 0, 200, 0.25) 70%,
+    rgba(220, 0, 180, 0.5) 100%
+  );
+  border-radius: 5px;
+  border: 1px solid rgba(0, 255, 242, 0.4);
+  box-shadow: 0 0 12px rgba(0, 255, 242, 0.2);
   pointer-events: none;
-  z-index: 5;
+  z-index: 2;
+}
+
+/* Circle handles above the track */
+.range-handle {
+  position: absolute;
+  top: 0;
+  width: 24px;
+  height: 24px;
+  margin-left: -12px;
+  border-radius: 50%;
+  cursor: grab;
+  z-index: 25;
+  user-select: none;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+}
+
+.range-handle:active {
+  cursor: grabbing;
+  transform: scale(1.1);
+}
+
+.range-handle:hover {
+  transform: scale(1.15);
+  box-shadow: 0 0 20px currentColor;
+}
+
+/* Start: cyan shade */
+.range-handle-start {
+  background: linear-gradient(135deg, #00d4cc 0%, #00fff2 50%, #00b8b0 100%);
+  box-shadow: 0 0 12px rgba(0, 255, 242, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.range-handle-start:hover {
+  box-shadow: 0 0 18px rgba(0, 255, 242, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+/* Stop: magenta shade */
+.range-handle-stop {
+  background: linear-gradient(135deg, #cc00aa 0%, #ff00e5 50%, #b00090 100%);
+  box-shadow: 0 0 12px rgba(255, 0, 229, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.range-handle-stop:hover {
+  box-shadow: 0 0 18px rgba(255, 0, 229, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.4);
 }
 
 /* Range Info Display */

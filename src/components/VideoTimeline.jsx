@@ -343,74 +343,67 @@ const VideoTimeline = forwardRef(({ videos, setVideos }, ref) => {
         playsInline
       />
 
-      {/* Timeline Bar */}
+      {/* Timeline Bar with Range Overlay */}
       <div className="timeline-bar-container">
-        <div 
-          ref={timelineBarRef}
-          className="timeline-bar"
-        >
-          {videos.map((video, index) => {
-            const segmentWidth = ((video.duration || 0) / totalDuration) * 100;
-            const isActive = index === currentVideoIndex;
-            
-            return (
-              <div
-                key={video.id || index}
-                className={`timeline-segment ${isActive ? 'active' : ''}`}
-                style={{ width: `${segmentWidth}%` }}
-                onClick={() => {
-                  if (!isPlaying) {
-                    setCurrentVideoIndex(index);
-                  }
-                }}
-              >
-                <div className="segment-label">
-                  <span className="segment-camera">Cam {video.cameraId}</span>
-                  <span className="segment-duration">{formatTime(video.duration || 0)}</span>
-                </div>
-                <button
-                  className="segment-remove"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    removeVideo(index);
-                  }}
-                  title="Remove from timeline"
-                >
-                  ×
-                </button>
-              </div>
-            );
-          })}
-          
-          {/* Selection Range Highlight */}
-          <div 
-            className="timeline-selection-range"
-            style={{
-              left: `${startMarkerPosition}%`,
-              width: `${stopMarkerPosition - startMarkerPosition}%`
-            }}
-          />
-          
-          {/* Start Marker */}
-          <div 
-            className="timeline-marker timeline-marker-start"
-            style={{ left: `${startMarkerPosition}%` }}
-            onMouseDown={handleMarkerMouseDown('start')}
-          >
-            <div className="marker-handle">
-              <span className="marker-label">START</span>
-            </div>
+        {/* Editor-style range overlay: track + selection bar + circle handles */}
+        <div className="timeline-range-wrapper" ref={timelineBarRef}>
+          <div className="timeline-range-overlay">
+            <div className="timeline-range-track" />
+            {/* Selection bar (line covering timeline section) */}
+            <div 
+              className="timeline-selection-range"
+              style={{
+                left: `${startMarkerPosition}%`,
+                width: `${stopMarkerPosition - startMarkerPosition}%`
+              }}
+            />
+            {/* Circle handles above the track */}
+            <div 
+              className="range-handle range-handle-start"
+              style={{ left: `${startMarkerPosition}%` }}
+              onMouseDown={handleMarkerMouseDown('start')}
+              title="Drag to set start"
+            />
+            <div 
+              className="range-handle range-handle-stop"
+              style={{ left: `${stopMarkerPosition}%` }}
+              onMouseDown={handleMarkerMouseDown('stop')}
+              title="Drag to set end"
+            />
           </div>
-          
-          {/* Stop Marker */}
-          <div 
-            className="timeline-marker timeline-marker-stop"
-            style={{ left: `${stopMarkerPosition}%` }}
-            onMouseDown={handleMarkerMouseDown('stop')}
-          >
-            <div className="marker-handle">
-              <span className="marker-label">STOP</span>
-            </div>
+          <div className="timeline-bar">
+            {videos.map((video, index) => {
+              const segmentWidth = ((video.duration || 0) / totalDuration) * 100;
+              const isActive = index === currentVideoIndex;
+              
+              return (
+                <div
+                  key={video.id || index}
+                  className={`timeline-segment ${isActive ? 'active' : ''}`}
+                  style={{ width: `${segmentWidth}%` }}
+                  onClick={() => {
+                    if (!isPlaying) {
+                      setCurrentVideoIndex(index);
+                    }
+                  }}
+                >
+                  <div className="segment-label">
+                    <span className="segment-camera">Cam {video.cameraId}</span>
+                    <span className="segment-duration">{formatTime(video.duration || 0)}</span>
+                  </div>
+                  <button
+                    className="segment-remove"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeVideo(index);
+                    }}
+                    title="Remove from timeline"
+                  >
+                    ×
+                  </button>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
