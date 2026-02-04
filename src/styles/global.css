@@ -17,6 +17,7 @@
   --glass-border: rgba(0, 255, 242, 0.2);
   --shadow-glow: 0 0 20px rgba(0, 255, 242, 0.3);
   --shadow-glow-strong: 0 0 30px rgba(0, 255, 242, 0.6);
+  --clapperboard-camera-row-height: 420px;
 }
 
 /* Reset & Base Styles */
@@ -456,6 +457,160 @@ body::before {
   font-style: italic;
 }
 
+/* Clapperboard Section - full width like Production Setup and Camera Feeds */
+.clapperboard-section {
+  margin-bottom: 3rem;
+  animation: fadeIn 1s ease-out;
+}
+
+.clapperboard-section-title {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 1.8rem;
+  font-weight: normal;
+  color: var(--accent-cyan);
+  margin-bottom: 1.5rem;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+.clapperboard {
+  width: 100%;
+}
+
+/* Surround: frame of the clapperboard (wood/slate edge) - double height of camera row */
+.clapperboard-surround {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(var(--clapperboard-camera-row-height) * 2);
+  background: var(--bg-tertiary);
+  border: 8px solid #2a2a2a;
+  border-radius: 4px;
+  box-shadow:
+    inset 0 0 0 2px rgba(0, 0, 0, 0.4),
+    0 4px 12px rgba(0, 0, 0, 0.5),
+    0 0 24px rgba(0, 255, 242, 0.15);
+  overflow: hidden;
+}
+
+/* Top clapper: hinged bar with diagonal stripes (black & white) */
+.clapperboard-clapper {
+  height: 96px;
+  background: #1a1a1a;
+  border-bottom: 3px solid #2a2a2a;
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+}
+
+.clapperboard-clapper-stripes {
+  width: 100%;
+  background: repeating-linear-gradient(
+    -45deg,
+    #0a0a0a,
+    #0a0a0a 12px,
+    #e8e8e8 12px,
+    #e8e8e8 24px
+  );
+  opacity: 0.95;
+}
+
+/* Slate panel (fields area) - grows to fill surround, text across full width and height */
+.clapperboard-panel {
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+  padding: 2rem 2rem;
+  background: var(--glass-bg);
+  backdrop-filter: blur(8px);
+  border-top: 1px solid var(--glass-border);
+}
+
+.clapperboard-fields {
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.clapperboard-row-single {
+  width: 100%;
+}
+
+.clapperboard-row-triple {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 2rem;
+  width: 100%;
+}
+
+.clapperboard-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.clapperboard-field-label {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 2.8rem;
+  font-weight: normal;
+  color: var(--accent-cyan);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+.clapperboard-field-value {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 2.8rem;
+  font-weight: normal;
+  color: var(--text-primary);
+  min-height: 3em;
+  border-bottom: 2px solid var(--glass-border);
+  padding-bottom: 0.5rem;
+}
+
+.clapperboard-field-value-empty {
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+
+/* Bottom sticks (hinge bars) */
+.clapperboard-sticks {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  background: #1a1a1a;
+  border-top: 3px solid #2a2a2a;
+}
+
+.clapperboard-stick {
+  width: 10px;
+  height: 36px;
+  background: linear-gradient(180deg, #3a3a3a, #2a2a2a);
+  border-radius: 2px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.1);
+}
+
+.clapperboard-stick-bottom {
+  height: 32px;
+  opacity: 0.9;
+}
+
+.clapperboard-hosted {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 1.8rem;
+  color: var(--accent-cyan);
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  text-align: center;
+  margin: 0;
+  padding: 1rem;
+  background: #1a1a1a;
+  border-top: 1px solid #2a2a2a;
+}
+
 /* Camera Section */
 .camera-section {
   margin-top: 3rem;
@@ -466,6 +621,7 @@ body::before {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 2rem;
+  min-height: var(--clapperboard-camera-row-height);
 }
 
 /* Camera Panel */

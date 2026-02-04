@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import ProductionSetup from './components/ProductionSetup';
+import ClapperBoard from './components/ClapperBoard';
 import CameraGrid from './components/CameraGrid';
 import VideoGallery from './components/VideoGallery';
 import VideoTimeline from './components/VideoTimeline';
@@ -36,11 +37,6 @@ function App() {
   useEffect(() => {
     fetchSession();
     fetchQRCodes();
-    
-    // Check and prompt for folder setup
-    StorageManager.checkAndPromptSetup().catch(err => {
-      console.warn('Storage setup check failed:', err);
-    });
   }, []);
   
   // WebSocket connection with reconnection logic
@@ -417,14 +413,27 @@ function App() {
     }
   };
   
-  const toggleRecording = (cameraId) => {
+  const toggleRecording = async (cameraId) => {
     const camera = cameras[cameraId];
     
     if (!camera.recording) {
-      // Start recording
+      // Ensure save folder is set before starting recording
+      const hasAccess = await StorageManager.hasDirectoryAccess();
+      if (!hasAccess) {
+        try {
+          await StorageManager.requestDirectoryAccess();
+          await StorageManager.getOrCreateFolder();
+        } catch (error) {
+          if (error.name === 'AbortError') {
+            return; // User cancelled folder picker
+          }
+          console.error('❌ Folder setup failed:', error);
+          alert(`Could not set save location: ${error.message}`);
+          return;
+        }
+      }
       startLocalRecording(cameraId);
     } else {
-      // Stop recording
       stopLocalRecording(cameraId);
     }
   };
@@ -648,7 +657,7 @@ function App() {
             cameras={cameras}
             onUpdateSession={updateSession}
           />
-          
+          <ClapperBoard />
         <CameraGrid 
           cameras={cameras} 
           onToggleRecording={toggleRecording}

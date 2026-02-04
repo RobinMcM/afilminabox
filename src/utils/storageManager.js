@@ -252,32 +252,3 @@ export async function hasDirectoryAccess() {
     return false;
   }
 }
-
-// Setup prompt - show once on first load
-export async function checkAndPromptSetup() {
-  const hasAccess = await hasDirectoryAccess();
-  if (!hasAccess) {
-    const userWants = confirm(
-      '📁 Set up "a Film in a Box" folder?\n\n' +
-      'This will:\n' +
-      '• Create a dedicated folder in your Downloads\n' +
-      '• Auto-save all recordings there\n' +
-      '• Auto-load video previews in gallery\n' +
-      '• Keep metadata organized\n\n' +
-      'Click OK to select your Downloads folder.'
-    );
-    
-    if (userWants) {
-      try {
-        await requestDirectoryAccess();
-        await getOrCreateFolder(); // Create the subfolder
-        alert('✅ Setup complete! Videos will now save to:\nDownloads/a Film in a Box/');
-        return true;
-      } catch (error) {
-        alert('❌ Setup cancelled. You can set this up later from settings.');
-        return false;
-      }
-    }
-  }
-  return hasAccess;
-}
