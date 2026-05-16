@@ -94,6 +94,66 @@ async function setCameraState(cameraId, connected, metadata = {}) {
   });
 }
 
+// ===================================
+// User Session Management
+// ===================================
+
+const SESSION_COOKIE = 'afiab_session';
+const SESSION_TTL = 86400; // 24 hours
+
+function parseCookies(req) {
+  const cookies = {};
+  const header = req.headers.cookie || '';
+  header.split(';').forEach(part => {
+    const eqIdx = part.indexOf('=');
+    if (eqIdx > 0) {
+      cookies[part.slice(0, eqIdx).trim()] = part.slice(eqIdx + 1).trim();
+    }
+  });
+  return cookies;
+}
+
+async function getUserSession(req) {
+  const cookies = parseCookies(req);
+  const sessionId = cookies[SESSION_COOKIE];
+  if (!sessionId) return null;
+  try {
+    const data = await valkey.hgetall(`user:session:${sessionId}`);
+    if (!data || !data.userId) return null;
+    return { ...data, sessionId };
+  } catch {
+    return null;
+  }
+}
+
+async function requireSession(req, res, next) {
+  const user = await getUserSession(req);
+  if (!user) {
+    return res.status(401).json({ success: false, error: 'Not authenticated' });
+  }
+  req.user = user;
+  // Refresh lastSeenAt so stale session detection and operator visibility stay accurate
+  valkey.hset(`user:session:${user.sessionId}`, 'lastSeenAt', new Date().toISOString()).catch(() => {});
+  next();
+}
+
+async function requireProjectMatch(req, res, next) {
+  try {
+    const syncProd = await valkey.get('sync:production');
+    if (syncProd) {
+      const { projectId: syncedProjectId } = JSON.parse(syncProd);
+      if (syncedProjectId && req.user.projectId !== syncedProjectId) {
+        console.warn(`🚫 Project mismatch: session=${req.user.projectId} synced=${syncedProjectId} user=${req.user.userId}`);
+        return res.status(403).json({
+          success: false,
+          error: 'Project mismatch — your session is for a different project. Re-launch from MovieShaker.',
+        });
+      }
+    }
+  } catch { /* Valkey failure is non-critical — allow through */ }
+  next();
+}
+
 // Track WebSocket connections in memory (per instance)
 const webClients = new Set();
 const cameraClients = new Map(); // cameraId -> ws connection
@@ -121,6 +181,132 @@ app.use((req, res, next) => {
 app.use(express.static(path.join(__dirname, '../dist')));
 
 // API Routes
+
+// ===================================
+// Auth — Launch token handshake
+// ===================================
+
+// GET /launch - Validate MovieShaker launch token, create session, redirect to dashboard
+app.get('/launch', async (req, res) => {
+  const { token, projectId } = req.query;
+  if (!token || !projectId) {
+    return res.status(400).send('Missing token or projectId');
+  }
+
+  const movieshakerBase = (process.env.MOVIESHAKER_BASE_URL || '').replace(/\/$/, '');
+  const apiKey = process.env.MOVIESHAKER_API_KEY || '';
+  if (!movieshakerBase || !apiKey) {
+    return res.status(503).send('aFilmInABox is not configured for MovieShaker integration');
+  }
+
+  try {
+    const resp = await fetch(`${movieshakerBase}/api/production/launch/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Internal-API-Key': apiKey },
+      body: JSON.stringify({ token, project_id: projectId }),
+    });
+
+    if (!resp.ok) {
+      return res.status(401).send('Invalid or expired launch token');
+    }
+
+    const payload = await resp.json();
+    if (!payload.success) {
+      return res.status(401).send('Token validation failed');
+    }
+
+    // Confirm user is still a project member — token could be up to 5 min old
+    try {
+      const memberResp = await fetch(`${movieshakerBase}/api/production/member-check`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Internal-API-Key': apiKey },
+        body: JSON.stringify({ user_id: payload.userId, project_id: payload.projectId }),
+      });
+      if (memberResp.ok) {
+        const memberData = await memberResp.json();
+        if (!memberData.isMember) {
+          console.warn(`🚫 Launch denied: ${payload.userId} is not a member of project ${payload.projectId}`);
+          return res.status(403).send('Permission denied: user is not a member of this project');
+        }
+      }
+      // If memberResp is not ok, proceed — token verify already confirmed access
+    } catch (memberErr) {
+      console.warn('⚠️ Member check error (proceeding):', memberErr.message);
+    }
+
+    const sessionId = uuidv4();
+    const isProduction = process.env.NODE_ENV === 'production';
+
+    // Pull director from sync:production if not in token payload
+    let director = payload.director || '';
+    if (!director) {
+      try {
+        const syncProd = await valkey.get('sync:production');
+        if (syncProd) director = JSON.parse(syncProd).director || '';
+      } catch { /* non-critical */ }
+    }
+
+    const now = new Date().toISOString();
+    const sessionData = {
+      userId: payload.userId,
+      projectId: payload.projectId,
+      projectName: payload.projectName || '',
+      director,
+      launchedBy: payload.userId,  // who generated the token; differs from userId when director launches for operator
+      launchedAt: now,
+      lastSeenAt: now,
+    };
+    if (payload.cameraRole) sessionData.cameraRole = payload.cameraRole;
+    if (payload.operatorName) sessionData.operatorName = payload.operatorName;
+
+    await valkey.hset(`user:session:${sessionId}`, sessionData);
+    await valkey.expire(`user:session:${sessionId}`, SESSION_TTL);
+
+    const cookieParts = [
+      `${SESSION_COOKIE}=${sessionId}`,
+      'HttpOnly',
+      'SameSite=Lax',
+      `Max-Age=${SESSION_TTL}`,
+      'Path=/',
+    ];
+    if (isProduction) cookieParts.push('Secure');
+
+    res.setHeader('Set-Cookie', cookieParts.join('; '));
+    res.redirect('/');
+  } catch (err) {
+    console.error('❌ Launch token validation failed:', err);
+    res.status(500).send('Authentication error');
+  }
+});
+
+// GET /api/me - Return current authenticated user context
+app.get('/api/me', requireSession, (req, res) => {
+  res.json({
+    success: true,
+    user: {
+      userId: req.user.userId,
+      projectId: req.user.projectId,
+      projectName: req.user.projectName || null,
+      director: req.user.director || null,
+      cameraRole: req.user.cameraRole || null,
+      operatorName: req.user.operatorName || null,
+      launchedBy: req.user.launchedBy || null,
+      launchedAt: req.user.launchedAt || null,
+      lastSeenAt: req.user.lastSeenAt || null,
+    },
+  });
+});
+
+// POST /api/session/logout - Clear session and cookie
+app.post('/api/session/logout', async (req, res) => {
+  const cookies = parseCookies(req);
+  const sessionId = cookies[SESSION_COOKIE];
+  if (sessionId) {
+    await valkey.del(`user:session:${sessionId}`).catch(() => {});
+  }
+  res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; HttpOnly; Max-Age=0; Path=/`);
+  res.json({ success: true });
+});
 
 // GET /api/session - Return current session metadata
 app.get('/api/session', async (req, res) => {
@@ -334,7 +520,7 @@ app.get('/api/recordings/:id/download', async (req, res) => {
 });
 
 // POST /api/recordings/:id/process - Submit recording for processing
-app.post('/api/recordings/:id/process', async (req, res) => {
+app.post('/api/recordings/:id/process', requireSession, async (req, res) => {
   try {
     const { id } = req.params;
     const { type } = req.body; // 'remove-background' or 'add-backdrop'
@@ -370,7 +556,7 @@ app.post('/api/recordings/:id/process', async (req, res) => {
 });
 
 // DELETE /api/recordings/:id - Delete recording
-app.delete('/api/recordings/:id', async (req, res) => {
+app.delete('/api/recordings/:id', requireSession, async (req, res) => {
   try {
     const { id } = req.params;
     const data = await valkey.hgetall(`recording:${id}`);
@@ -740,7 +926,7 @@ async function getActiveShot() {
 }
 
 // POST /api/active-shot — select which shot is currently being filmed
-app.post('/api/active-shot', async (req, res) => {
+app.post('/api/active-shot', requireSession, requireProjectMatch, async (req, res) => {
   try {
     const { shotId } = req.body;
     if (!shotId) {
@@ -771,7 +957,7 @@ app.post('/api/active-shot', async (req, res) => {
 });
 
 // DELETE /api/active-shot — clear the active shot
-app.delete('/api/active-shot', async (req, res) => {
+app.delete('/api/active-shot', requireSession, requireProjectMatch, async (req, res) => {
   try {
     await valkey.del('active:shot');
     broadcastToWebClients({ type: 'active-shot-changed', shot: null });
@@ -808,9 +994,17 @@ app.get('/health', async (req, res) => {
 });
 
 // WebSocket handling
-wss.on('connection', (ws) => {
+wss.on('connection', async (ws, req) => {
   console.log('🔌 New WebSocket connection');
-  
+
+  // Attach user session from cookie if present (best-effort; cameras won't have one)
+  const wsSession = await getUserSession(req).catch(() => null);
+  if (wsSession) {
+    ws.userId = wsSession.userId;
+    ws.projectId = wsSession.projectId;
+    ws.sessionId = wsSession.sessionId;
+  }
+
   let clientType = null;
   let cameraId = null;
   
@@ -831,6 +1025,12 @@ wss.on('connection', (ws) => {
             await setCameraState(cameraId, true, message.metadata || {});
 
             console.log(`📷 Camera ${cameraId} connected`);
+
+            // Warn if no production sync data — camera won't have shot/scene context
+            const syncProdRaw = await valkey.get('sync:production').catch(() => null);
+            if (!syncProdRaw) {
+              console.warn(`⚠️ Camera ${cameraId} connected but no sync:production in Valkey — sync to box first`);
+            }
 
             const role = await valkey.get(`camera:${cameraId}:role`);
             const activeShot = await getActiveShot();
@@ -872,10 +1072,20 @@ wss.on('connection', (ws) => {
           }
           const currentActiveShot = await getActiveShot();
 
+          const userCtx = wsSession ? {
+            userId: wsSession.userId,
+            projectId: wsSession.projectId,
+            projectName: wsSession.projectName || null,
+            director: wsSession.director || null,
+            cameraRole: wsSession.cameraRole || null,
+            operatorName: wsSession.operatorName || null,
+          } : null;
+
           ws.send(JSON.stringify({
             type: 'initial-state',
             cameras: cameraStates,
-            activeShot: currentActiveShot
+            activeShot: currentActiveShot,
+            userSession: userCtx,
           }));
           break;
           

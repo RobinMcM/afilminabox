@@ -19,6 +19,8 @@ function App() {
     filmGuid: '',
     productionCompanyGuid: ''
   });
+
+  const [userSession, setUserSession] = useState(null);
   
   const [qrCodes, setQRCodes] = useState({
     1: null,
@@ -37,6 +39,7 @@ function App() {
   useEffect(() => {
     fetchSession();
     fetchQRCodes();
+    fetchUserSession();
   }, []);
   
   // WebSocket connection with reconnection logic
@@ -120,6 +123,10 @@ function App() {
             }
             return updated;
           });
+        }
+        // Hydrate user session from WS if REST fetch hasn't resolved yet
+        if (message.userSession) {
+          setUserSession(prev => prev || message.userSession);
         }
         break;
         
@@ -360,6 +367,18 @@ function App() {
     });
   };
   
+  const fetchUserSession = async () => {
+    try {
+      const response = await fetch('/api/me');
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) setUserSession(data.user);
+      }
+    } catch (error) {
+      console.error('❌ Error fetching user session:', error);
+    }
+  };
+
   const fetchSession = async () => {
     try {
       const response = await fetch('/api/session');
@@ -630,15 +649,29 @@ function App() {
             <p className="app-subtitle">Film Production Multi-Camera Controller</p>
           </div>
           
+          {userSession && (
+            <div className="production-context">
+              <span className="production-project">
+                {userSession.projectName || 'Production'}
+              </span>
+              {userSession.director && (
+                <span className="production-detail">Dir: {userSession.director}</span>
+              )}
+              {userSession.cameraRole && (
+                <span className="production-role">{userSession.cameraRole.replace('_', ' ')}</span>
+              )}
+            </div>
+          )}
+
           <nav className="app-navigation">
-            <button 
+            <button
               className={`nav-btn ${currentView === 'control' ? 'active' : ''}`}
               onClick={() => setCurrentView('control')}
             >
               <span className="nav-icon">📹</span>
               Camera Control
             </button>
-            <button 
+            <button
               className={`nav-btn ${currentView === 'gallery' ? 'active' : ''}`}
               onClick={() => setCurrentView('gallery')}
             >
