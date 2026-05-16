@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { networkInterfaces } from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { timingSafeEqual } from 'crypto';
 import Redis from 'ioredis';
 import dotenv from 'dotenv';
 
@@ -72,12 +73,16 @@ async function initializeSession() {
   }
 }
 
+const VALID_CAMERA_ROLES = new Set(['A_CAM', 'B_CAM', 'GIMBAL_CAM', 'BTS_CAM']);
+
 // Camera state management in Valkey
 async function getCameraState(cameraId) {
   const state = await valkey.hgetall(`camera:${cameraId}`);
+  const role = await valkey.get(`camera:${cameraId}:role`);
   return {
     connected: state.connected === 'true',
-    metadata: state.metadata ? JSON.parse(state.metadata) : {}
+    metadata: state.metadata ? JSON.parse(state.metadata) : {},
+    role: role || null
   };
 }
 
@@ -406,6 +411,392 @@ app.delete('/api/recordings/:id', async (req, res) => {
   }
 });
 
+// ===================================
+// Internal API key auth (sync routes)
+// ===================================
+
+function requireInternalKey(req, res, next) {
+  const expected = process.env.INTERNAL_API_KEY || '';
+  const provided = req.headers['x-internal-api-key'] || '';
+  if (!expected || expected.length !== provided.length) {
+    return res.status(401).json({ success: false, error: 'Unauthorized' });
+  }
+  if (!timingSafeEqual(Buffer.from(expected, 'utf8'), Buffer.from(provided, 'utf8'))) {
+    return res.status(401).json({ success: false, error: 'Unauthorized' });
+  }
+  next();
+}
+
+// ===================================
+// Production Sync Endpoints (MovieShaker → aFilmInABox)
+// ===================================
+
+// POST /api/sync/production — receive project identity from MovieShaker
+app.post('/api/sync/production', requireInternalKey, async (req, res) => {
+  try {
+    const { projectId, name, director, syncedAt, callbackUrl } = req.body;
+    if (!projectId) {
+      return res.status(400).json({ success: false, error: 'projectId is required' });
+    }
+
+    const payload = JSON.stringify({ projectId, name: name || '', director: director || '', syncedAt: syncedAt || new Date().toISOString(), callbackUrl: callbackUrl || '' });
+    await valkey.set('sync:production', payload);
+
+    // Align session filmGuid with the MovieShaker project ID so QR codes carry the correct GUID
+    await valkey.set('session:filmGuid', projectId);
+
+    console.log(`🎬 Production synced: ${projectId} (${name})`);
+    res.json({ success: true, projectId });
+  } catch (error) {
+    console.error('❌ Error syncing production:', error);
+    res.status(500).json({ success: false, error: 'Failed to sync production' });
+  }
+});
+
+// GET /api/sync/production — read back synced production (verification)
+app.get('/api/sync/production', requireInternalKey, async (req, res) => {
+  try {
+    const raw = await valkey.get('sync:production');
+    if (!raw) return res.json({ success: true, production: null });
+    res.json({ success: true, production: JSON.parse(raw) });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Failed to read production sync' });
+  }
+});
+
+// POST /api/sync/scenes — receive scene list from MovieShaker (idempotent)
+app.post('/api/sync/scenes', requireInternalKey, async (req, res) => {
+  try {
+    const { scenes } = req.body;
+    if (!Array.isArray(scenes)) {
+      return res.status(400).json({ success: false, error: 'scenes must be an array' });
+    }
+
+    await valkey.set('sync:scenes', JSON.stringify(scenes));
+
+    console.log(`🎞️ Scenes synced: ${scenes.length} scenes`);
+    res.json({ success: true, sceneCount: scenes.length });
+  } catch (error) {
+    console.error('❌ Error syncing scenes:', error);
+    res.status(500).json({ success: false, error: 'Failed to sync scenes' });
+  }
+});
+
+// GET /api/sync/scenes — read back synced scenes (verification)
+app.get('/api/sync/scenes', requireInternalKey, async (req, res) => {
+  try {
+    const raw = await valkey.get('sync:scenes');
+    if (!raw) return res.json({ success: true, scenes: [] });
+    res.json({ success: true, scenes: JSON.parse(raw) });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Failed to read scenes sync' });
+  }
+});
+
+// POST /api/sync/shots — receive shot list from MovieShaker (idempotent)
+app.post('/api/sync/shots', requireInternalKey, async (req, res) => {
+  try {
+    const { shots } = req.body;
+    if (!Array.isArray(shots)) {
+      return res.status(400).json({ success: false, error: 'shots must be an array' });
+    }
+
+    await valkey.set('sync:shots', JSON.stringify(shots));
+
+    console.log(`🎯 Shots synced: ${shots.length} shots`);
+    res.json({ success: true, shotCount: shots.length });
+  } catch (error) {
+    console.error('❌ Error syncing shots:', error);
+    res.status(500).json({ success: false, error: 'Failed to sync shots' });
+  }
+});
+
+// GET /api/sync/shots — read back synced shots (verification)
+app.get('/api/sync/shots', requireInternalKey, async (req, res) => {
+  try {
+    const raw = await valkey.get('sync:shots');
+    if (!raw) return res.json({ success: true, shots: [] });
+    res.json({ success: true, shots: JSON.parse(raw) });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Failed to read shots sync' });
+  }
+});
+
+// POST /api/sync/cameras — batch assign camera roles from MovieShaker (idempotent)
+app.post('/api/sync/cameras', requireInternalKey, async (req, res) => {
+  try {
+    const { cameras } = req.body;
+    if (!Array.isArray(cameras)) {
+      return res.status(400).json({ success: false, error: 'cameras must be an array' });
+    }
+
+    for (const cam of cameras) {
+      const slot = parseInt(cam.slot);
+      if (![1, 2, 3].includes(slot)) continue;
+      if (cam.role && VALID_CAMERA_ROLES.has(cam.role)) {
+        await valkey.set(`camera:${slot}:role`, cam.role);
+        if (cam.operatorName) await valkey.set(`camera:${slot}:operator`, cam.operatorName);
+      } else {
+        await valkey.del(`camera:${slot}:role`);
+      }
+    }
+
+    broadcastToWebClients({ type: 'camera-roles-updated' });
+    console.log(`🎥 Camera roles synced: ${cameras.length} assignments`);
+    res.json({ success: true, count: cameras.length });
+  } catch (error) {
+    console.error('❌ Error syncing cameras:', error);
+    res.status(500).json({ success: false, error: 'Failed to sync camera roles' });
+  }
+});
+
+// GET /api/sync/cameras — read back camera role assignments (verification)
+app.get('/api/sync/cameras', requireInternalKey, async (req, res) => {
+  try {
+    const cameras = [];
+    for (let i = 1; i <= 3; i++) {
+      const role = await valkey.get(`camera:${i}:role`);
+      const operator = await valkey.get(`camera:${i}:operator`);
+      cameras.push({ slot: i, role: role || null, operatorName: operator || null });
+    }
+    res.json({ success: true, cameras });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Failed to read camera sync' });
+  }
+});
+
+// PUT /api/cameras/:id/role — assign or clear a camera role on a specific slot
+app.put('/api/cameras/:id/role', requireInternalKey, async (req, res) => {
+  const cameraId = parseInt(req.params.id);
+  if (![1, 2, 3].includes(cameraId)) {
+    return res.status(400).json({ success: false, error: 'Invalid camera ID' });
+  }
+
+  const { role, operatorName } = req.body;
+
+  try {
+    if (role === null || role === undefined || role === '') {
+      await valkey.del(`camera:${cameraId}:role`);
+      await valkey.del(`camera:${cameraId}:operator`);
+    } else {
+      if (!VALID_CAMERA_ROLES.has(role)) {
+        return res.status(400).json({ success: false, error: `role must be one of: ${[...VALID_CAMERA_ROLES].join(', ')}` });
+      }
+      await valkey.set(`camera:${cameraId}:role`, role);
+      if (operatorName) await valkey.set(`camera:${cameraId}:operator`, operatorName);
+    }
+
+    broadcastToWebClients({ type: 'camera-role-assigned', cameraId, role: role || null });
+    console.log(`🎥 Camera ${cameraId} role set to: ${role || 'none'}`);
+    res.json({ success: true, cameraId, role: role || null });
+  } catch (error) {
+    console.error('❌ Error setting camera role:', error);
+    res.status(500).json({ success: false, error: 'Failed to set camera role' });
+  }
+});
+
+// ===================================
+// MovieShaker take callbacks (fire-and-forget helpers)
+// ===================================
+
+async function notifyMovieShakerTakeStart({ projectId, sceneId, tramLineId, cameraRole, recordingId, startedAt }) {
+  const baseUrl = (process.env.MOVIESHAKER_BASE_URL || '').replace(/\/$/, '');
+  const apiKey = process.env.MOVIESHAKER_API_KEY || '';
+  if (!baseUrl || !apiKey) return null;
+
+  const resp = await fetch(`${baseUrl}/api/production/takes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Internal-API-Key': apiKey },
+    body: JSON.stringify({ project_id: projectId, scene_id: sceneId || null, tram_line_id: tramLineId, camera_role: cameraRole, take_number: 0, recording_id: recordingId || null, started_at: startedAt, status: 'recording' })
+  });
+  if (!resp.ok) throw new Error(`MovieShaker take start ${resp.status}`);
+  return resp.json();
+}
+
+async function notifyMovieShakerTakeComplete({ takeId, takeNumber, completedAt, duration, videoPath, recordingId }) {
+  const baseUrl = (process.env.MOVIESHAKER_BASE_URL || '').replace(/\/$/, '');
+  const apiKey = process.env.MOVIESHAKER_API_KEY || '';
+  if (!baseUrl || !apiKey) return null;
+
+  const resp = await fetch(`${baseUrl}/api/production/takes/${takeId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'X-Internal-API-Key': apiKey },
+    body: JSON.stringify({ status: 'completed', take_number: takeNumber, completed_at: completedAt, duration, video_path: videoPath || null, recording_id: recordingId })
+  });
+  if (!resp.ok) throw new Error(`MovieShaker take update ${resp.status}`);
+  return resp.json();
+}
+
+// ===================================
+// Recording Creation (browser → server on capture complete)
+// ===================================
+
+// POST /api/recordings — called by browser when a recording file is saved
+app.post('/api/recordings', async (req, res) => {
+  try {
+    const { id, cameraId, duration, fileSize, filePath, thumbnailPath } = req.body;
+    const parsedCameraId = parseInt(cameraId) || 1;
+
+    const activeShot = await getActiveShot();
+    const role = await valkey.get(`camera:${parsedCameraId}:role`);
+    const filmGuid = await valkey.get('session:filmGuid');
+    const productionCompanyGuid = await valkey.get('session:productionCompanyGuid');
+
+    // Read pending take (created on start-recording)
+    const pendingRaw = await valkey.get(`pending:take:${parsedCameraId}`);
+    const pending = pendingRaw ? JSON.parse(pendingRaw) : null;
+
+    // Determine take number: use pending number if available, else increment counter
+    let takeNumber = pending?.takeNumber || null;
+    if (!takeNumber && activeShot?.id) {
+      takeNumber = await valkey.incr(`take:count:${activeShot.id}`);
+    }
+    takeNumber = takeNumber || 1;
+
+    const recordingId = id || uuidv4();
+    const timestamp = new Date().toISOString();
+
+    await valkey.hmset(`recording:${recordingId}`, {
+      id: recordingId,
+      filmGuid: filmGuid || '',
+      productionCompanyGuid: productionCompanyGuid || '',
+      cameraId: String(parsedCameraId),
+      timestamp,
+      duration: String(duration || 0),
+      fileSize: String(fileSize || 0),
+      filePath: filePath || '',
+      thumbnailPath: thumbnailPath || '',
+      status: 'raw',
+      shotId: activeShot?.id || '',
+      sceneId: activeShot?.sceneId || '',
+      takeNumber: String(takeNumber),
+      cameraRole: role || '',
+      movieshakerTakeId: pending?.movieshakerTakeId || ''
+    });
+
+    // Notify MovieShaker: update existing take to completed
+    if (pending?.movieshakerTakeId) {
+      notifyMovieShakerTakeComplete({
+        takeId: pending.movieshakerTakeId,
+        takeNumber,
+        completedAt: timestamp,
+        duration: parseFloat(duration || 0),
+        videoPath: filePath || null,
+        recordingId
+      }).catch(err => console.error('Take complete notification failed:', err));
+      await valkey.del(`pending:take:${parsedCameraId}`);
+    }
+
+    broadcastToWebClients({ type: 'recording-saved', recording: { id: recordingId, cameraId: parsedCameraId, takeNumber, shotId: activeShot?.id || null, cameraRole: role || null } });
+    console.log(`🎬 Recording saved: ${recordingId} (take ${takeNumber}, shot: ${activeShot?.title || 'unlinked'})`);
+    res.json({ success: true, recording: { id: recordingId, takeNumber, shotId: activeShot?.id || null } });
+  } catch (error) {
+    console.error('❌ Error creating recording:', error);
+    res.status(500).json({ success: false, error: 'Failed to create recording' });
+  }
+});
+
+// ===================================
+// Shot Execution (active shot selection)
+// ===================================
+
+// Build the full active shot record from a shotId by joining sync:shots + sync:scenes
+async function buildActiveShotData(shotId) {
+  const shotsRaw = await valkey.get('sync:shots');
+  const scenesRaw = await valkey.get('sync:scenes');
+  const shots = shotsRaw ? JSON.parse(shotsRaw) : [];
+  const scenes = scenesRaw ? JSON.parse(scenesRaw) : [];
+
+  const shot = shots.find(s => s.id === shotId);
+  if (!shot) return null;
+
+  const scene = scenes.find(s => s.id === shot.sceneId) || null;
+
+  const titleParts = [];
+  if (scene?.sceneNumber) titleParts.push(`Scene ${scene.sceneNumber}`);
+  if (scene?.heading) titleParts.push(scene.heading);
+  if (shot.lineNumber) titleParts.push(`Shot ${shot.lineNumber}`);
+  if (shot.shotType) titleParts.push(`(${shot.shotType})`);
+
+  return {
+    id: shot.id,
+    sceneId: shot.sceneId || null,
+    title: titleParts.join(' — '),
+    sceneHeading: scene?.heading || '',
+    sceneNumber: scene?.sceneNumber || null,
+    lineNumber: shot.lineNumber,
+    cameraRole: shot.cameraRole || null,
+    shotType: shot.shotType || null,
+    framingNotes: shot.framingNotes || '',
+    movementNotes: shot.movementNotes || '',
+    durationTarget: shot.durationTarget || null,
+    characterNames: shot.characterNames || '',
+  };
+}
+
+async function getActiveShot() {
+  const raw = await valkey.get('active:shot');
+  return raw ? JSON.parse(raw) : null;
+}
+
+// POST /api/active-shot — select which shot is currently being filmed
+app.post('/api/active-shot', async (req, res) => {
+  try {
+    const { shotId } = req.body;
+    if (!shotId) {
+      return res.status(400).json({ success: false, error: 'shotId is required' });
+    }
+
+    const shotData = await buildActiveShotData(shotId);
+    if (!shotData) {
+      return res.status(404).json({ success: false, error: 'Shot not found in sync data — run sync-to-box first' });
+    }
+
+    await valkey.set('active:shot', JSON.stringify(shotData));
+
+    // Push shot context to all connected cameras immediately
+    cameraClients.forEach((cameraWs, camId) => {
+      if (cameraWs.readyState === 1) {
+        cameraWs.send(JSON.stringify({ type: 'active-shot', shot: shotData }));
+      }
+    });
+
+    broadcastToWebClients({ type: 'active-shot-changed', shot: shotData });
+    console.log(`🎯 Active shot set: ${shotData.title}`);
+    res.json({ success: true, shot: shotData });
+  } catch (error) {
+    console.error('❌ Error setting active shot:', error);
+    res.status(500).json({ success: false, error: 'Failed to set active shot' });
+  }
+});
+
+// DELETE /api/active-shot — clear the active shot
+app.delete('/api/active-shot', async (req, res) => {
+  try {
+    await valkey.del('active:shot');
+    broadcastToWebClients({ type: 'active-shot-changed', shot: null });
+    cameraClients.forEach((cameraWs) => {
+      if (cameraWs.readyState === 1) {
+        cameraWs.send(JSON.stringify({ type: 'active-shot', shot: null }));
+      }
+    });
+    console.log('🎯 Active shot cleared');
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Failed to clear active shot' });
+  }
+});
+
+// GET /api/active-shot — read current active shot
+app.get('/api/active-shot', async (req, res) => {
+  try {
+    const shot = await getActiveShot();
+    res.json({ success: true, shot });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Failed to read active shot' });
+  }
+});
+
 // Health check endpoint
 app.get('/health', async (req, res) => {
   try {
@@ -434,31 +825,33 @@ wss.on('connection', (ws) => {
           // Camera registration
           cameraId = message.cameraId;
           clientType = 'camera';
-          
+
           if ([1, 2, 3].includes(cameraId)) {
             cameraClients.set(cameraId, ws);
             await setCameraState(cameraId, true, message.metadata || {});
-            
+
             console.log(`📷 Camera ${cameraId} connected`);
-            
-            // CRITICAL: Send confirmation back to camera
+
+            const role = await valkey.get(`camera:${cameraId}:role`);
+            const activeShot = await getActiveShot();
+
+            // CRITICAL: Send confirmation + shot context back to camera
             ws.send(JSON.stringify({
               type: 'registered',
               cameraId: cameraId,
-              status: 'connected'
+              status: 'connected',
+              cameraRole: role || null,
+              shot: activeShot
             }));
-            console.log(`✅ Sent registration confirmation to Camera ${cameraId}`);
-            
-            console.log(`👥 Broadcasting to ${webClients.size} web clients`);
-            
+            console.log(`✅ Sent registration confirmation to Camera ${cameraId} (role: ${role || 'unassigned'})`);
+
             // Broadcast to all web clients
-            const broadcastMessage = {
+            broadcastToWebClients({
               type: 'camera-connected',
               cameraId: cameraId,
-              metadata: message.metadata || {}
-            };
-            console.log('📡 Broadcasting message:', JSON.stringify(broadcastMessage));
-            broadcastToWebClients(broadcastMessage);
+              metadata: message.metadata || {},
+              cameraRole: role || null
+            });
           }
           break;
           
@@ -468,8 +861,8 @@ wss.on('connection', (ws) => {
           webClients.add(ws);
           console.log('🌐 Web client registered');
           console.log(`👥 Total web clients: ${webClients.size}`);
-          
-          // Send current camera states
+
+          // Send current camera states + active shot
           const cameraStates = {};
           for (let i = 1; i <= 3; i++) {
             const state = await getCameraState(i);
@@ -477,11 +870,12 @@ wss.on('connection', (ws) => {
               cameraStates[i] = state;
             }
           }
-          
-          console.log('📤 Sending initial state to client:', JSON.stringify(cameraStates));
+          const currentActiveShot = await getActiveShot();
+
           ws.send(JSON.stringify({
             type: 'initial-state',
-            cameras: cameraStates
+            cameras: cameraStates,
+            activeShot: currentActiveShot
           }));
           break;
           
@@ -497,15 +891,14 @@ wss.on('connection', (ws) => {
               cameraId = message.cameraId;
               cameraClients.set(cameraId, ws);
               await setCameraState(cameraId, true, message.metadata || {});
-              
-              // Broadcast camera connected
-              const broadcastMessage = {
+
+              const autoRole = await valkey.get(`camera:${cameraId}:role`);
+              broadcastToWebClients({
                 type: 'camera-connected',
                 cameraId: cameraId,
-                metadata: message.metadata || {}
-              };
-              console.log('📡 Broadcasting message:', JSON.stringify(broadcastMessage));
-              broadcastToWebClients(broadcastMessage);
+                metadata: message.metadata || {},
+                cameraRole: autoRole || null
+              });
             }
             
             if (clientType === 'web-client') {
@@ -539,14 +932,61 @@ wss.on('connection', (ws) => {
           }
           break;
         
-        case 'start-recording':
+        case 'start-recording': {
+          // Forward to camera with active shot context
+          if (message.cameraId) {
+            const targetCamera = cameraClients.get(message.cameraId);
+            if (targetCamera && targetCamera.readyState === 1) {
+              const shotForCamera = await getActiveShot();
+              const roleForCamera = await valkey.get(`camera:${message.cameraId}:role`);
+              targetCamera.send(JSON.stringify({
+                ...message,
+                shot: shotForCamera,
+                cameraRole: roleForCamera || null
+              }));
+              console.log(`🎬 start-recording sent to Camera ${message.cameraId} (shot: ${shotForCamera?.title || 'none'})`);
+
+              // Notify MovieShaker: take created (fire-and-forget)
+              if (shotForCamera?.id) {
+                const prodRaw = await valkey.get('sync:production');
+                const production = prodRaw ? JSON.parse(prodRaw) : null;
+                if (production?.projectId) {
+                  const startedAt = new Date().toISOString();
+                  const camId = message.cameraId;
+                  // Increment take counter now; POST /api/recordings uses this stored number
+                  const takeNumber = await valkey.incr(`take:count:${shotForCamera.id}`);
+                  notifyMovieShakerTakeStart({
+                    projectId: production.projectId,
+                    sceneId: shotForCamera.sceneId || null,
+                    tramLineId: shotForCamera.id,
+                    cameraRole: roleForCamera || '',
+                    recordingId: null,
+                    startedAt
+                  }).then(result => {
+                    if (result?.take?.id) {
+                      valkey.set(`pending:take:${camId}`, JSON.stringify({
+                        movieshakerTakeId: result.take.id,
+                        shotId: shotForCamera.id,
+                        sceneId: shotForCamera.sceneId || null,
+                        takeNumber,
+                        startedAt
+                      })).catch(() => {});
+                    }
+                  }).catch(err => console.error('Take start notification failed:', err));
+                }
+              }
+            }
+          }
+          break;
+        }
+
         case 'stop-recording':
           // Recording control - forward to camera
           if (message.cameraId) {
             const targetCamera = cameraClients.get(message.cameraId);
             if (targetCamera && targetCamera.readyState === 1) {
               targetCamera.send(JSON.stringify(message));
-              console.log(`🎬 ${message.type} sent to Camera ${message.cameraId}`);
+              console.log(`🎬 stop-recording sent to Camera ${message.cameraId}`);
             }
           }
           break;
